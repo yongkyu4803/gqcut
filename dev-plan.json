@@ -1,0 +1,684 @@
+{
+  "$schema": "./dev-plan.schema.json",
+  "meta": {
+    "project": "CapCut-like Desktop Video Editor",
+    "version": "0.2.0",
+    "createdAt": "2026-07-01",
+    "updatedAt": "2026-07-02",
+    "targetPlatform": "Desktop (Electron + React + TypeScript)",
+    "goal": "실제 배포 가능한 데스크톱 영상 편집기 제품",
+    "developerLevel": "intermediate",
+    "coreFeatures": [
+      "타임라인 컷 편집",
+      "자막/텍스트",
+      "오디오/배경음악",
+      "효과/전환/필터"
+    ],
+    "corePrinciple": "프리뷰 엔진(WebCodecs+WebGL, 실시간)과 내보내기 엔진(FFmpeg, 오프라인)을 분리하되, 이펙트/합성 결과는 양쪽이 동일해야 한다(WYSIWYG). WYSIWYG 판정은 정성 비교가 아니라 수치 기준(기준 프레임 SSIM)으로 한다.",
+    "revisionNotes": "v0.2.0 (2026-07-02): (1) WebGL 컴포지터를 Phase 4에서 Phase 1.3으로 전진(Canvas2D→WebGL 재작업 제거), (2) 내보내기 파이프라인 스파이크를 Phase 1.5로 전진(WYSIWYG 구조 리스크 조기 검증), (3) 최소 오디오 재생을 1.4(A/V 싱크)에 포함(Phase 2 의존성 역전 해소), (4) 코덱 호환성 fallback을 Phase 0.4로 승격 + VFR 감지를 0.2에 추가, (5) 품질 기준 수치화(SSIM/내보내기 속도), (6) 초기 내보내기 프리셋 H.264+AAC 한정, (7) e2e 스모크(1.6)와 CI 게이트(0.1.6) 추가.",
+    "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다."
+  },
+
+  "techStack": {
+    "shell": "Electron",
+    "ui": "React + TypeScript",
+    "stateManagement": "Zustand + command pattern (undo/redo)",
+    "realtimePreview": "WebCodecs API + WebGL (Phase 1부터 WebGL 컴포지터 채택)",
+    "effectsCompositing": "WebGL (PixiJS 선택 가능)",
+    "audioPreview": "Web Audio API",
+    "exportRender": "FFmpeg (bundled binary) + ffprobe",
+    "exportRenderHost": "미정 — Phase 1.5 스파이크에서 결정 (숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess)",
+    "audioMixdown": "미정 — Phase 5.1에서 결정 (OfflineAudioContext vs FFmpeg 오디오 필터)",
+    "bundler": "Vite",
+    "testing": "Vitest (unit) + Playwright (e2e)"
+  },
+
+  "progressLegend": {
+    "done": "checklist 항목 완료 여부 (true/false)",
+    "status": "step 진행 상태: not_started | in_progress | verifying | done | blocked"
+  },
+
+  "phases": [
+    {
+      "id": "phase-0",
+      "name": "기반 세팅",
+      "goal": "앱 셸을 띄우고 영상 파일을 읽어 첫 프레임을 화면에 그린다. 미지원 코덱/VFR 소스도 호환 프록시로 열 수 있다.",
+      "estimate": "2주",
+      "status": "not_started",
+      "steps": [
+        {
+          "id": "0.1",
+          "name": "프로젝트 스캐폴딩",
+          "description": "Electron + React + TS + Vite 보일러플레이트 구성, 메인/렌더러 프로세스 분리.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "0.1.1", "task": "Electron + Vite + React + TS 프로젝트 생성", "done": false },
+            { "id": "0.1.2", "task": "메인 프로세스 <-> 렌더러 IPC 통신 채널 셋업", "done": false },
+            { "id": "0.1.3", "task": "ESLint + Prettier + tsconfig strict 설정", "done": false },
+            { "id": "0.1.4", "task": "Vitest + Playwright 테스트 러너 설정", "done": false },
+            { "id": "0.1.5", "task": "Git 저장소 + .gitignore + 기본 README 커밋", "done": false },
+            { "id": "0.1.6", "task": "CI 파이프라인 셋업(빌드 + 테스트 + plan:validate 게이트)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "npm run dev 로 앱을 실행한다",
+              "빈 창이 뜨는지 확인한다",
+              "렌더러에서 IPC로 메인에 ping 을 보내고 pong 응답을 콘솔에서 확인한다",
+              "npm run test 로 샘플 테스트가 통과하는지 확인한다",
+              "CI에서 빌드+테스트+plan:validate 가 자동 실행되는지 확인한다"
+            ],
+            "successCriteria": [
+              "앱 창이 에러 없이 뜬다",
+              "IPC ping/pong 왕복이 동작한다",
+              "빌드(npm run build)가 성공한다",
+              "CI 게이트가 동작한다"
+            ],
+            "onFailure": "IPC 실패 시 contextBridge/preload 설정 점검, 빌드 실패 시 vite electron 플러그인 버전 호환 확인"
+          }
+        },
+        {
+          "id": "0.2",
+          "name": "FFmpeg 번들링 + 미디어 프로브",
+          "description": "FFmpeg/ffprobe 바이너리를 앱에 번들하고 메인 프로세스에서 실행 가능하게 한다. 프로브 단계에서 코덱 지원 여부와 VFR 여부까지 판별한다.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "0.2.1", "task": "플랫폼별 ffmpeg/ffprobe 바이너리 번들 및 경로 해석", "done": false },
+            { "id": "0.2.2", "task": "메인 프로세스에서 ffprobe로 파일 메타데이터(코덱/해상도/fps/duration) 추출", "done": false },
+            { "id": "0.2.3", "task": "IPC로 렌더러에 메타데이터 전달하는 API 작성", "done": false },
+            { "id": "0.2.4", "task": "가변 프레임레이트(VFR) 여부 감지 + WebCodecs 디코딩 지원 여부 판별(코덱별)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "테스트용 mp4 파일 경로를 넘겨 ffprobe 실행",
+              "반환된 JSON에서 width/height/fps/duration 값을 로그로 확인",
+              "VFR 소스(스마트폰 촬영본)를 넣어 VFR로 판별되는지 확인",
+              "손상된/비디오 아닌 파일을 넣어 에러가 graceful 하게 처리되는지 확인"
+            ],
+            "successCriteria": [
+              "정상 파일에서 정확한 메타데이터가 반환된다",
+              "VFR/미지원 코덱 여부가 프로브 결과에 포함된다",
+              "잘못된 파일에서 앱이 크래시하지 않고 에러 메시지를 반환한다"
+            ],
+            "onFailure": "바이너리 실행 권한(chmod +x on mac/linux), asar unpack 설정 확인. VFR 판별은 r_frame_rate vs avg_frame_rate 비교로"
+          }
+        },
+        {
+          "id": "0.3",
+          "name": "파일 임포트 + 첫 프레임 렌더",
+          "description": "파일 다이얼로그로 영상을 불러와 WebCodecs로 첫 프레임을 캔버스에 그린다. (임시 Canvas2D 렌더 — Phase 1.3에서 WebGL 컴포지터로 대체)",
+          "status": "not_started",
+          "checklist": [
+            { "id": "0.3.1", "task": "파일 열기 다이얼로그 + 드래그앤드롭 임포트", "done": false },
+            { "id": "0.3.2", "task": "MP4 demux 라이브러리 선정(mp4box.js 등 스파이크) + WebCodecs VideoDecoder 초기화", "done": false },
+            { "id": "0.3.3", "task": "첫 키프레임 디코딩 후 canvas에 drawImage", "done": false },
+            { "id": "0.3.4", "task": "썸네일 생성 유틸(특정 timestamp 프레임 추출)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "영상 파일을 임포트한다",
+              "캔버스에 첫 프레임 이미지가 표시되는지 눈으로 확인",
+              "원본 영상 첫 프레임과 색/구도가 일치하는지 비교",
+              "여러 코덱(H.264/H.265) 파일로 반복 테스트"
+            ],
+            "successCriteria": [
+              "임포트한 영상의 첫 프레임이 왜곡 없이 캔버스에 표시된다",
+              "H.264 파일에서 정상 동작한다",
+              "demux 라이브러리 선정이 확정되어 TECH-STACK.md에 기록된다"
+            ],
+            "onFailure": "WebCodecs 미지원 코덱은 0.4 fallback 경로로 넘긴다, VideoDecoder config 확인"
+          }
+        },
+        {
+          "id": "0.4",
+          "name": "코덱 호환성 fallback(호환 프록시)",
+          "description": "WebCodecs로 디코딩할 수 없는 코덱(예: Windows HEVC)과 VFR 소스를 FFmpeg 트랜스코딩으로 호환 프록시(H.264 CFR)를 만들어 열 수 있게 한다. Phase 1 프리뷰가 모든 소스에서 동작하기 위한 전제조건.",
+          "status": "not_started",
+          "criticalRisk": "이 fallback 없이는 Windows HEVC 등 흔한 소스에서 Phase 1 재생 검증 자체가 불가능하다",
+          "checklist": [
+            { "id": "0.4.1", "task": "WebCodecs 미지원/디코더 초기화 실패 감지 로직(프로브 결과 + 런타임 실패 처리)", "done": false },
+            { "id": "0.4.2", "task": "FFmpeg 트랜스코딩으로 호환 프록시 생성(H.264 + CFR 정규화, VFR 소스 포함)", "done": false },
+            { "id": "0.4.3", "task": "프록시 생성 진행률 표시 + MediaAsset.proxyPath 매핑 + 캐시(재생성 방지)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "WebCodecs 미지원 코덱 파일(또는 강제 fallback 플래그)로 임포트한다",
+              "호환 프록시가 자동 생성되고 진행률이 표시되는지 확인",
+              "프록시로 첫 프레임이 렌더되는지 확인",
+              "VFR 파일이 CFR 프록시로 정규화되어 fps가 고정되는지 ffprobe로 확인",
+              "같은 파일 재임포트 시 프록시를 재생성하지 않는지 확인"
+            ],
+            "successCriteria": [
+              "미지원 코덱 파일도 임포트 후 프레임 렌더가 가능하다",
+              "VFR 소스가 CFR 프록시로 정규화된다",
+              "프록시가 캐시되어 중복 생성되지 않는다"
+            ],
+            "onFailure": "트랜스코딩 파라미터(GOP 길이, 키프레임 간격) 조정 — 시크 성능에 직결됨. 진행률은 ffmpeg -progress 파이프로"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-1",
+      "name": "타임라인 + 프리뷰 MVP + 내보내기 스파이크",
+      "goal": "클립을 자르고 이어붙여 끊김 없이 재생하고(소리 포함), 컷 편집만 되는 최소 내보내기로 파이프라인 구조를 조기 검증한다.",
+      "estimate": "4-6주",
+      "status": "not_started",
+      "criticalPath": true,
+      "steps": [
+        {
+          "id": "1.1",
+          "name": "데이터 모델 + 상태관리",
+          "description": "Project/Track/Clip/MediaAsset 불변 데이터 모델과 명령 기반 undo/redo 구현. (DATA-MODEL.md의 전환 의미론/트랙 볼륨/마스터 볼륨 포함)",
+          "status": "not_started",
+          "checklist": [
+            { "id": "1.1.1", "task": "Project/Track/Clip/MediaAsset 타입 정의(TS) — DATA-MODEL.md 준수", "done": false },
+            { "id": "1.1.2", "task": "Zustand 스토어 + immutable 업데이트 규칙", "done": false },
+            { "id": "1.1.3", "task": "커맨드 패턴(execute/undo) + 히스토리 스택", "done": false },
+            { "id": "1.1.4", "task": "프로젝트 JSON 직렬화/역직렬화(save/load)", "done": false },
+            { "id": "1.1.5", "task": "불변식(invariants) 검증 유틸 + 개발 모드 assert", "done": false },
+            { "id": "1.1.6", "task": "모델 조작 함수 유닛 테스트", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "코드로 클립 추가 -> 이동 -> 삭제를 수행",
+              "undo를 연속 호출해 각 단계가 정확히 되돌려지는지 확인",
+              "redo로 다시 복원되는지 확인",
+              "프로젝트를 save 후 load 했을 때 상태가 동일한지 deep-equal 비교",
+              "npm run test 로 모델 유닛테스트 통과 확인"
+            ],
+            "successCriteria": [
+              "undo/redo가 모든 조작에서 정확히 동작",
+              "save->load 왕복 후 상태 완전 일치",
+              "모델 유닛테스트 100% 통과"
+            ],
+            "onFailure": "상태 mutation 누수(불변성 위반) 추적, 히스토리 스택 분기 처리 재검토"
+          }
+        },
+        {
+          "id": "1.2",
+          "name": "타임라인 UI",
+          "description": "트랙/클립을 시각화하고 드래그·트림·분할·스냅·줌 조작을 제공한다.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "1.2.1", "task": "타임라인 눈금(시간축) + 줌 인/아웃", "done": false },
+            { "id": "1.2.2", "task": "클립 블록 렌더 + 드래그로 위치 이동", "done": false },
+            { "id": "1.2.3", "task": "클립 양 끝 드래그로 트림(in/out 조절)", "done": false },
+            { "id": "1.2.4", "task": "플레이헤드에서 클립 분할(split)", "done": false },
+            { "id": "1.2.5", "task": "스냅(클립 경계/플레이헤드에 자석) + 멀티트랙", "done": false },
+            { "id": "1.2.6", "task": "선택/삭제/복사/붙여넣기 단축키", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "클립을 드래그해 위치를 옮긴다 -> 데이터 모델 값이 UI와 일치하는지 확인",
+              "클립 끝을 드래그해 트림 -> sourceIn/Out 이 정확히 바뀌는지 확인",
+              "플레이헤드에서 split -> 클립이 2개로 정확히 나뉘는지 확인",
+              "스냅 동작(경계 근처에서 자석)을 눈으로 확인",
+              "각 조작 후 undo가 동작하는지 확인"
+            ],
+            "successCriteria": [
+              "드래그/트림/분할/스냅이 프레임 단위로 정확하게 반영된다",
+              "UI 표시값과 데이터 모델 값이 항상 일치한다"
+            ],
+            "onFailure": "픽셀<->시간 좌표 변환 로직 재검증, 줌 배율에 따른 오차 점검"
+          }
+        },
+        {
+          "id": "1.3",
+          "name": "WebGL 프리뷰 컴포지터(기초)",
+          "description": "프리뷰 렌더를 처음부터 WebGL 텍스처 합성으로 구축한다(0.3의 임시 Canvas2D 렌더 대체). Phase 3 텍스트, Phase 4 필터/전환, Phase 5 내보내기가 모두 이 컴포지터 위에 쌓이므로 재작업을 원천 차단한다.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "1.3.1", "task": "WebGL 컨텍스트 + 단일 프레임 텍스처 렌더(0.3 Canvas2D 대체)", "done": false },
+            { "id": "1.3.2", "task": "클립 transform(위치/크기/회전/투명도) 셰이더 적용", "done": false },
+            { "id": "1.3.3", "task": "다중 레이어 합성(블렌딩) 순서 처리", "done": false },
+            { "id": "1.3.4", "task": "색공간(sRGB↔linear) / premultiplied alpha 일관 처리 규칙 수립 + 문서화", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "기존 Canvas2D 렌더 결과와 WebGL 렌더 결과가 픽셀상 동일한지 비교",
+              "transform 적용 시 위치/크기/회전이 정확한지 확인",
+              "레이어 순서대로 위아래가 맞게 겹치는지 확인",
+              "밝은/어두운 영상에서 색이 원본과 일치하는지 확인(색공간 검증)"
+            ],
+            "successCriteria": [
+              "WebGL 렌더가 Canvas2D 기준 렌더와 픽셀상 동일하다",
+              "transform과 레이어 합성이 정확하다",
+              "색공간/알파 처리 규칙이 문서화된다"
+            ],
+            "onFailure": "색공간(sRGB/linear) 변환 확인, premultiplied alpha 처리 점검, 텍스처 UNPACK 플래그 확인"
+          }
+        },
+        {
+          "id": "1.4",
+          "name": "재생 엔진 + A/V 동기화",
+          "description": "WebCodecs로 타임라인을 실시간 재생하고 오디오-비디오를 동기화한다. 비디오 클립의 소리 재생(최소 경로)을 포함한다 — 이것 없이는 A/V 싱크 검증이 불가능하다.",
+          "status": "not_started",
+          "criticalRisk": "프레임 정확 시크와 A/V 동기화가 가장 어려운 구간",
+          "checklist": [
+            { "id": "1.4.1", "task": "재생 루프(requestVideoFrameCallback 기반) 구현", "done": false },
+            { "id": "1.4.2", "task": "타임라인 시간 -> 클립/소스 프레임 매핑", "done": false },
+            { "id": "1.4.3", "task": "프레임 디코딩 캐시/프리페치(버퍼링)", "done": false },
+            { "id": "1.4.4", "task": "키프레임 기반 정확 시크(seek)", "done": false },
+            { "id": "1.4.5", "task": "비디오 클립 오디오 트랙 디코딩 + 재생(최소 단일 경로 — 믹싱/페이드는 Phase 2)", "done": false },
+            { "id": "1.4.6", "task": "오디오 클럭(AudioContext.currentTime) 기준 A/V 동기화", "done": false },
+            { "id": "1.4.7", "task": "재생/일시정지/스크럽/속도 제어", "done": false },
+            { "id": "1.4.8", "task": "클립 경계 전환 시 끊김 없는 재생", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "클립 2개를 이어붙여 처음부터 끝까지 재생",
+              "클립 경계에서 프레임 드랍/멈춤이 없는지 확인",
+              "임의 지점으로 seek -> 정확한 프레임이 표시되는지 원본과 비교",
+              "말소리 있는 영상에서 입모양과 소리 싱크가 맞는지 확인(A/V sync)",
+              "10분 이상 재생 시 메모리 누수/누적 지연이 없는지 모니터링"
+            ],
+            "successCriteria": [
+              "클립 경계에서 끊김 없이 재생된다",
+              "seek 시 목표 프레임 오차가 ±1프레임 이내",
+              "A/V 싱크 어긋남이 체감되지 않는다(±40ms 이내)",
+              "장시간 재생에도 메모리가 안정적이다"
+            ],
+            "onFailure": "디코더 큐 백프레셔 처리, 시크 시 디코더 flush/reset, 오디오 지연 보정값 조정"
+          }
+        },
+        {
+          "id": "1.5",
+          "name": "내보내기 파이프라인 스파이크 (walking skeleton)",
+          "description": "컷 편집만 되는 최소 내보내기를 만들어 '프레임 렌더 -> FFmpeg 파이프' 구조의 실행 위치와 처리량을 조기 검증한다. 여기서 확정한 구조가 Phase 5의 뼈대가 된다. 색공간 불일치·파이프 병목 같은 구조적 결함을 12주차가 아니라 지금 발견하는 것이 목적.",
+          "status": "not_started",
+          "criticalRisk": "WYSIWYG(프리뷰=결과물)와 프레임 전송 처리량(1080p30 RGBA ≈ 초당 250MB)의 구조적 리스크를 조기 검증하는 단계",
+          "checklist": [
+            { "id": "1.5.1", "task": "렌더 실행 위치 결정(숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess) + ARCHITECTURE.md 반영", "done": false },
+            { "id": "1.5.2", "task": "OffscreenCanvas(WebGL, 1.3 컴포지터 재사용) 프레임 렌더 -> FFmpeg stdin 파이프 인코딩(컷 편집만)", "done": false },
+            { "id": "1.5.3", "task": "프레임 전송 처리량 측정(1080p30 기준) + 병목 시 대안 평가(YUV 변환/transferable/공유 메모리)", "done": false },
+            { "id": "1.5.4", "task": "오디오 단일 트랙 패스스루 mux(스파이크 범위 — 믹스다운은 Phase 5)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "2클립 컷 타임라인을 내보낸다",
+              "출력 duration = 타임라인 duration 인지 확인",
+              "컷 지점이 프리뷰와 프레임 단위로 일치하는지 확인",
+              "출력 프레임과 프리뷰 프레임을 동일 timestamp에서 눈으로 비교(색/구도)",
+              "내보내기 소요 시간과 프레임 전송 처리량을 기록한다"
+            ],
+            "successCriteria": [
+              "컷 편집 타임라인이 파일로 내보내진다",
+              "출력 duration과 컷 지점이 정확하다",
+              "출력 프레임이 프리뷰와 시각적으로 일치한다(색공간 문제 없음)",
+              "1080p30 기준 처리량이 측정·기록되고, 실사용 가능 수준(최종 목표 ≤2× 실시간)에 도달 가능하다고 판단된다",
+              "렌더 실행 위치 결정이 ARCHITECTURE.md에 기록된다"
+            ],
+            "onFailure": "readPixels 병목이면 YUV 변환 후 전송 또는 인코더에 가까운 프로세스로 렌더 이동 검토. 색 불일치면 1.3.4 색공간 규칙 재검증"
+          }
+        },
+        {
+          "id": "1.6",
+          "name": "e2e 스모크 + 회귀 게이트",
+          "description": "임포트→컷→재생→내보내기(스파이크)를 관통하는 Playwright 스모크를 만들어 이후 모든 phase의 회귀 게이트로 사용한다. (globalVerificationGates의 '전체 회귀 테스트' 실체)",
+          "status": "not_started",
+          "checklist": [
+            { "id": "1.6.1", "task": "Playwright 스모크: 임포트 -> 컷 편집 -> 재생 -> 내보내기까지 1개 시나리오", "done": false },
+            { "id": "1.6.2", "task": "모델/커맨드 유닛테스트 + 스모크를 CI 게이트에 연결", "done": false },
+            { "id": "1.6.3", "task": "스모크 실패 시 phase 진행을 막는 규칙을 README/CI에 명문화", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "로컬에서 e2e 스모크를 실행해 통과 확인",
+              "CI에서 스모크가 자동 실행되는지 확인",
+              "의도적으로 컷 로직을 깨뜨려 스모크가 실패를 잡는지 확인(역검증)"
+            ],
+            "successCriteria": [
+              "스모크가 로컬/CI에서 통과한다",
+              "회귀를 실제로 감지한다(역검증 통과)"
+            ],
+            "onFailure": "Electron + Playwright 연동은 _electron.launch API 사용, 헤드리스 환경에서 GPU 플래그 확인"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-2",
+      "name": "오디오 / 배경음악",
+      "goal": "1.4의 최소 오디오 재생 경로를 확장해 파형·볼륨/페이드·다중 트랙 믹싱을 완성한다.",
+      "estimate": "2주",
+      "status": "not_started",
+      "steps": [
+        {
+          "id": "2.1",
+          "name": "오디오 트랙 + 파형",
+          "description": "오디오 클립을 타임라인에 배치하고 파형을 시각화한다.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "2.1.1", "task": "오디오 파일 임포트 + 디코딩(AudioBuffer)", "done": false },
+            { "id": "2.1.2", "task": "파형(waveform) 데이터 생성 + 렌더", "done": false },
+            { "id": "2.1.3", "task": "오디오 전용 트랙 타입 + 클립 배치/트림", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "음악 파일을 임포트해 파형이 표시되는지 확인",
+              "파형의 피크가 실제 소리 크기와 대응하는지 확인",
+              "오디오 클립을 트림/이동했을 때 파형이 따라오는지 확인"
+            ],
+            "successCriteria": [
+              "파형이 실제 오디오와 대응되게 렌더된다",
+              "오디오 클립 조작이 정확하다"
+            ],
+            "onFailure": "샘플레이트 불일치 확인, 파형 다운샘플링 로직 점검"
+          }
+        },
+        {
+          "id": "2.2",
+          "name": "믹싱 + 볼륨/페이드",
+          "description": "Web Audio API로 다중 트랙을 믹싱하고 클립/트랙/마스터 볼륨과 페이드를 적용한다. (1.4.5의 단일 경로를 다중 트랙 그래프로 확장)",
+          "status": "not_started",
+          "checklist": [
+            { "id": "2.2.1", "task": "Web Audio 그래프(클립 GainNode -> 트랙 GainNode -> 마스터 GainNode) 구성", "done": false },
+            { "id": "2.2.2", "task": "클립별/트랙별 볼륨 + 마스터 볼륨(데이터 모델 volume/masterVolume 필드 연동)", "done": false },
+            { "id": "2.2.3", "task": "페이드 인/아웃(볼륨 automation)", "done": false },
+            { "id": "2.2.4", "task": "재생 엔진과 오디오 타임라인 동기화(1.4 A/V 싱크 유지 확인)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "배경음악 + 원본 오디오를 동시에 재생해 믹싱되는지 확인",
+              "볼륨 슬라이더 조절이 실시간 반영되는지 확인",
+              "페이드 인/아웃 구간에서 소리가 부드럽게 커지고 작아지는지 확인",
+              "영상 seek 시 오디오도 같은 지점으로 점프하는지 확인",
+              "1.6 e2e 스모크가 여전히 통과하는지 확인"
+            ],
+            "successCriteria": [
+              "다중 오디오가 클리핑 없이 믹싱된다",
+              "볼륨/페이드가 실시간으로 정확히 적용된다",
+              "오디오와 비디오 타임라인이 동기화된다"
+            ],
+            "onFailure": "AudioContext currentTime 기준 스케줄링 재검토, 클리핑 시 마스터 게인 정규화"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-3",
+      "name": "자막 / 텍스트",
+      "goal": "텍스트 레이어를 WebGL 컴포지터 위에 추가하고 스타일·애니메이션을 적용한다. (선택: 자동 자막)",
+      "estimate": "2주",
+      "status": "not_started",
+      "steps": [
+        {
+          "id": "3.1",
+          "name": "텍스트 레이어 + 스타일",
+          "description": "텍스트 클립을 타임라인에 추가하고 프리뷰 위에 오버레이한다. 텍스트는 Canvas2D로 래스터한 뒤 WebGL 텍스처로 업로드해 1.3 컴포지터의 레이어로 합성한다(내보내기에서 동일 경로 재사용 → 재작업 없음).",
+          "status": "not_started",
+          "checklist": [
+            { "id": "3.1.1", "task": "텍스트 클립 타입 + 타임라인 배치", "done": false },
+            { "id": "3.1.2", "task": "텍스트 래스터(Canvas2D) -> WebGL 텍스처 업로드 렌더(폰트/크기/색/정렬)", "done": false },
+            { "id": "3.1.3", "task": "외곽선/그림자/배경 박스 스타일", "done": false },
+            { "id": "3.1.4", "task": "화면에서 드래그로 위치/크기 조절", "done": false },
+            { "id": "3.1.5", "task": "등장/퇴장 애니메이션(fade/slide 등)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "텍스트를 추가하고 프리뷰에 정확한 시간 구간에만 표시되는지 확인",
+              "폰트/색/외곽선 스타일이 즉시 반영되는지 확인",
+              "화면에서 드래그로 위치를 옮겨 좌표가 저장되는지 확인",
+              "애니메이션이 지정한 타이밍에 재생되는지 확인"
+            ],
+            "successCriteria": [
+              "텍스트가 지정 구간에만 정확히 표시된다",
+              "스타일/위치/애니메이션이 정확히 렌더된다",
+              "텍스트가 WebGL 레이어로 합성된다(별도 DOM 오버레이 아님)"
+            ],
+            "onFailure": "캔버스 좌표계(해상도 스케일) 통일, 폰트 로딩 타이밍(FontFace) 확인, 텍스처 알파 블렌딩 점검"
+          }
+        },
+        {
+          "id": "3.2",
+          "name": "(선택) 자동 자막(STT)",
+          "description": "음성 인식으로 자막을 자동 생성한다.",
+          "status": "not_started",
+          "optional": true,
+          "checklist": [
+            { "id": "3.2.1", "task": "STT 엔진 선택(Whisper 로컬 or API)", "done": false },
+            { "id": "3.2.2", "task": "오디오 추출 -> STT -> 타임코드 있는 자막 생성", "done": false },
+            { "id": "3.2.3", "task": "생성된 자막을 텍스트 클립으로 자동 배치", "done": false },
+            { "id": "3.2.4", "task": "자막 편집/재정렬 UI", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "말소리 영상에서 자동 자막을 생성",
+              "자막 텍스트 정확도와 타임코드 싱크를 확인",
+              "생성된 자막을 편집/삭제할 수 있는지 확인"
+            ],
+            "successCriteria": [
+              "자막이 음성과 대체로 일치하고 타임코드가 맞는다",
+              "생성 후 편집이 가능하다"
+            ],
+            "onFailure": "긴 오디오는 청크 분할 처리, 타임코드 오프셋 보정"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-4",
+      "name": "효과 / 전환 / 필터",
+      "goal": "1.3 컴포지터 위에 필터 셰이더와 클립 간 전환을 얹는다. 이펙트 규격(effects-spec)을 확립해 내보내기와 공유한다. (WebGL 기반 전환 작업은 1.3에서 완료 — 이 phase는 이펙트 자체에 집중)",
+      "estimate": "2-3주",
+      "status": "not_started",
+      "steps": [
+        {
+          "id": "4.1",
+          "name": "필터(색보정) + effects-spec",
+          "description": "밝기/대비/채도 등 필터를 구현하고, 프리뷰·내보내기가 공유할 이펙트 파라미터 규격을 확립한다.",
+          "status": "not_started",
+          "criticalRisk": "여기서 만든 효과는 Phase 5 내보내기에서 동일하게 재현되어야 함(WYSIWYG) — 셰이더 정의를 shared/effects-spec 한 곳에만 둔다",
+          "checklist": [
+            { "id": "4.1.1", "task": "shared/effects-spec 이펙트 파라미터 규격 + 셰이더 정의(프리뷰·내보내기 공유 단일 소스)", "done": false },
+            { "id": "4.1.2", "task": "기본 필터 셰이더(밝기/대비/채도/색온도)", "done": false },
+            { "id": "4.1.3", "task": "필터 파라미터 UI + 실시간 프리뷰", "done": false },
+            { "id": "4.1.4", "task": "이펙트 파라미터를 데이터 모델에 직렬화(save/load 복원)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "필터를 적용해 파라미터 조절이 실시간 반영되는지 확인",
+              "이펙트 설정 후 save->load 시 그대로 복원되는지 확인",
+              "동일 파라미터로 Phase 5 렌더 결과와 비교할 기준 프레임을 캡처해둔다"
+            ],
+            "successCriteria": [
+              "필터가 실시간으로 정확히 적용된다",
+              "이펙트 파라미터가 저장/복원된다",
+              "셰이더/수식이 shared/effects-spec 한 곳에만 정의되어 있다"
+            ],
+            "onFailure": "셰이더 파라미터 범위 정규화(0~1), 색공간에서 필터를 적용하는 위치(sRGB vs linear) 확정"
+          }
+        },
+        {
+          "id": "4.2",
+          "name": "클립 간 전환",
+          "description": "DATA-MODEL.md의 전환 의미론(소스 핸들 규칙)에 따라 디졸브/와이프/슬라이드 전환을 구현한다.",
+          "status": "not_started",
+          "criticalRisk": "전환 구간은 두 클립의 프레임이 동시에 필요 — 소스 핸들(여유분) 부족 시 프레임 홀드 fallback 규칙을 프리뷰·내보내기가 동일하게 적용해야 WYSIWYG가 유지된다",
+          "checklist": [
+            { "id": "4.2.1", "task": "전환 시간 의미론 구현(DATA-MODEL 핸들 규칙: 소스 여유분 확인 + 부족 시 프레임 홀드)", "done": false },
+            { "id": "4.2.2", "task": "전환 셰이더(디졸브/와이프/슬라이드) — progress 0~1 보간", "done": false },
+            { "id": "4.2.3", "task": "전환 UI(클립 경계에 배치, 길이 조절) + 데이터 모델 직렬화", "done": false },
+            { "id": "4.2.4", "task": "WYSIWYG 기준 프레임 캡처(필터/전환/텍스트 포함 — Phase 5 픽셀 비교용)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "전환 구간에서 두 클립이 지정 방식으로 부드럽게 넘어가는지 확인",
+              "소스 여유분이 없는 클립에 전환을 걸어 프레임 홀드 fallback이 동작하는지 확인",
+              "전환 설정 후 save->load 시 그대로 복원되는지 확인",
+              "기준 프레임(필터/전환/텍스트 조합)을 캡처해 저장한다"
+            ],
+            "successCriteria": [
+              "전환이 실시간으로 정확히 적용된다",
+              "핸들 부족 시 fallback이 결정론적으로 동작한다",
+              "내보내기 검증용 기준 프레임이 확보된다"
+            ],
+            "onFailure": "전환 타이밍(progress 0~1) 계산 검증, 두 클립 디코더 동시 구동 시 프리페치 경합 점검"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-5",
+      "name": "내보내기 엔진 (스파이크 확장)",
+      "goal": "1.5 스파이크 파이프라인을 전체 기능(이펙트/텍스트/전환/오디오 믹스다운)으로 확장하고, WYSIWYG를 수치 기준(SSIM)으로 검증한다.",
+      "estimate": "2-3주",
+      "status": "not_started",
+      "criticalPath": true,
+      "steps": [
+        {
+          "id": "5.1",
+          "name": "타임라인 -> 렌더 명세 변환",
+          "description": "1.5에서 확정한 구조 위에서, 타임라인 전체(이펙트/텍스트/전환 포함)를 프레임 렌더 명세와 오디오 믹스다운 명세로 변환한다.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "5.1.1", "task": "타임라인 -> 프레임 시퀀스 명세 생성(경계는 프레임 인덱스로 스냅, 이펙트/텍스트/전환 포함)", "done": false },
+            { "id": "5.1.2", "task": "오디오 믹스다운 경로 결정(OfflineAudioContext vs FFmpeg 오디오 필터) + TECH-STACK.md 기록", "done": false },
+            { "id": "5.1.3", "task": "오디오 믹스다운 명세 생성(클립/트랙/마스터 볼륨 + 페이드 반영)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "간단한 2클립 타임라인으로 렌더 명세를 생성",
+              "명세의 프레임 수 = fps * duration 과 일치하는지 확인",
+              "오디오 트랙이 명세에 모두 포함되고 볼륨/페이드 값이 반영되는지 확인"
+            ],
+            "successCriteria": [
+              "렌더 명세가 타임라인을 정확히 표현한다",
+              "프레임 수/오디오 구성이 계산과 일치한다",
+              "오디오 믹스다운 경로가 확정되어 문서화된다"
+            ],
+            "onFailure": "반올림 오차로 인한 프레임 누락 점검(경계는 항상 프레임 단위 스냅), VFR 소스는 0.4에서 CFR 정규화됨을 전제로 확인"
+          }
+        },
+        {
+          "id": "5.2",
+          "name": "렌더 실행 + WYSIWYG 수치 검증",
+          "description": "실제 파일을 인코딩하고 프리뷰와 결과물의 일치를 SSIM 기준으로 검증한다. 초기 프리셋은 H.264+AAC(MP4)로 한정한다(H.265 인코딩은 특허 라이선스 검토 후).",
+          "status": "not_started",
+          "criticalRisk": "프리뷰와 결과물 불일치가 이 단계의 핵심 리스크 — 구조 리스크는 1.5에서 제거됐으므로 여기서는 이펙트 재현 정확도에 집중",
+          "checklist": [
+            { "id": "5.2.1", "task": "프레임 렌더(1.3/4.x 컴포지터+effects-spec 재사용) -> FFmpeg stdin 파이프 인코딩", "done": false },
+            { "id": "5.2.2", "task": "오디오 믹스다운 + 비디오 mux", "done": false },
+            { "id": "5.2.3", "task": "진행률 표시 + 취소 기능(프로세스 종료 + 임시파일 정리)", "done": false },
+            { "id": "5.2.4", "task": "해상도/비트레이트 프리셋(초기 H.264+AAC/MP4 한정)", "done": false },
+            { "id": "5.2.5", "task": "기준 프레임 SSIM 자동 비교 스크립트(4.2.4 캡처본 vs 출력 프레임)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "컷/자막/오디오/필터/전환이 모두 포함된 타임라인을 내보낸다",
+              "출력 파일을 재생해 컷 지점/자막/음악/필터가 프리뷰와 동일한지 확인",
+              "4.2.4 기준 프레임과 출력 프레임을 동일 timestamp에서 SSIM 비교(자동 스크립트)",
+              "출력 duration = 타임라인 duration 인지 확인",
+              "A/V 싱크가 출력물에서도 유지되는지 확인",
+              "1080p30 5분 타임라인의 내보내기 소요 시간을 측정한다",
+              "렌더 중 취소가 정상 동작하는지 확인"
+            ],
+            "successCriteria": [
+              "기준 프레임 SSIM ≥ 0.99 (전 기준 프레임)",
+              "출력 duration 오차 ±1프레임 이내, A/V 싱크 ±40ms 이내",
+              "1080p30 5분 타임라인 내보내기 ≤ 2× 실시간(10분, 기준 개발 머신)",
+              "진행률/취소가 정상 동작한다"
+            ],
+            "onFailure": "SSIM 미달 프레임의 원인 분류(색공간/이펙트 수식/전환 타이밍) 후 shared/effects-spec 정의로 통합, 속도 미달 시 1.5.3 처리량 대안 재평가"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "phase-6",
+      "name": "제품화",
+      "goal": "실사용에 견디는 저장/성능/안정성/배포를 갖춘다.",
+      "estimate": "지속",
+      "status": "not_started",
+      "steps": [
+        {
+          "id": "6.1",
+          "name": "프로젝트 저장 + 자동저장",
+          "description": "프로젝트 파일 저장/열기, 자동저장, 미디어 상대경로 관리.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "6.1.1", "task": "프로젝트 파일(.proj) 저장/열기", "done": false },
+            { "id": "6.1.2", "task": "자동저장 + 크래시 복구", "done": false },
+            { "id": "6.1.3", "task": "미디어 경로 관리(이동/누락 파일 재연결)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "프로젝트를 저장 후 앱 재시작해 동일하게 복원되는지 확인",
+              "강제 종료 후 자동저장에서 복구되는지 확인",
+              "미디어 파일을 옮긴 뒤 재연결이 동작하는지 확인"
+            ],
+            "successCriteria": [
+              "저장/복원이 무손실이다",
+              "크래시 후 복구가 동작한다"
+            ],
+            "onFailure": "직렬화 스키마 버전 관리 추가, 절대경로 의존 제거"
+          }
+        },
+        {
+          "id": "6.2",
+          "name": "성능(고해상도 프록시) + 안정성",
+          "description": "고해상도 편집을 위한 성능용 프록시(0.4 호환 프록시 인프라 재사용·확장), 캐시, 크래시 대응.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "6.2.1", "task": "성능용 프록시(고해상도 소스 -> 저해상도 편집) — 0.4 인프라 확장, 내보내기 시 원본 전환", "done": false },
+            { "id": "6.2.2", "task": "프레임/썸네일 캐시 정책(LRU 상한)", "done": false },
+            { "id": "6.2.3", "task": "에러 바운더리 + 크래시 리포팅", "done": false },
+            { "id": "6.2.4", "task": "메모리 사용량 모니터링/상한", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "4K 영상으로 프록시 편집 시 재생이 부드러운지 확인",
+              "내보내기는 원본 해상도로 나가는지 확인",
+              "장시간 편집 세션에서 메모리가 안정적인지 확인"
+            ],
+            "successCriteria": [
+              "고해상도 소스에서도 프리뷰가 실시간에 가깝다",
+              "내보내기는 원본 품질로 나간다",
+              "장시간 사용에도 안정적이다"
+            ],
+            "onFailure": "프록시 자동 생성 백그라운드 처리, 캐시 LRU 상한 설정"
+          }
+        },
+        {
+          "id": "6.3",
+          "name": "배포 + 업데이트",
+          "description": "코드사이닝, 인스톨러, 자동 업데이트, 라이선스.",
+          "status": "not_started",
+          "checklist": [
+            { "id": "6.3.1", "task": "electron-builder 패키징(mac/win)", "done": false },
+            { "id": "6.3.2", "task": "코드사이닝 + 공증(notarization)", "done": false },
+            { "id": "6.3.3", "task": "자동 업데이트(electron-updater)", "done": false },
+            { "id": "6.3.4", "task": "라이선스 정리(FFmpeg LGPL/GPL 빌드 구분, 폰트, H.265 인코딩 도입 시 특허 라이선스 검토)", "done": false }
+          ],
+          "verification": {
+            "loop": [
+              "클린 머신에 인스톨러로 설치해 정상 실행 확인",
+              "OS 보안 경고 없이 실행되는지 확인(서명/공증)",
+              "새 버전 배포 시 자동 업데이트가 동작하는지 확인"
+            ],
+            "successCriteria": [
+              "서명된 인스톨러가 경고 없이 설치/실행된다",
+              "자동 업데이트가 동작한다",
+              "라이선스 고지가 완비된다"
+            ],
+            "onFailure": "공증 실패 로그 확인, entitlements 설정 점검"
+          }
+        }
+      ]
+    }
+  ],
+
+  "globalVerificationGates": [
+    "각 step은 checklist 전부 done=true 이고 verification.successCriteria 를 모두 만족해야 status=done 으로 전환한다.",
+    "criticalPath=true 인 phase는 다음 phase 진입 전 1.6 e2e 스모크를 포함한 전체 회귀 테스트(재생/편집/내보내기)를 통과해야 한다. (1.6 완성 전에는 수동 스모크로 대체)",
+    "criticalRisk 표시가 있는 step은 완료 후 반드시 실제 파일 기반 수동 검증을 1회 이상 수행한다.",
+    "WYSIWYG 판정은 정성 비교가 아니라 수치 기준으로 한다: 기준 프레임 SSIM ≥ 0.99, 출력 duration 오차 ±1프레임, A/V 싱크 ±40ms.",
+    "프리뷰와 내보내기가 다르게 동작할 수 있는 코드(셰이더/이펙트 수식/전환 타이밍)는 shared/effects-spec 한 곳에만 정의한다 — 복제 금지."
+  ]
+}

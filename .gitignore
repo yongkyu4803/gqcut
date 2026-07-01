@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+release/
+*.asar
+
+# Electron / packaging
+app/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Media test assets (대용량 — 커밋 금지)
+samples/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+
+# 자동저장 / 임시 프로젝트
+*.autosave
+.tmp/

@@ -1,0 +1,15 @@
+{
+  "name": "video-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CapCut 유사 데스크톱 영상 편집기 (기획 단계)",
+  "type": "module",
+  "scripts": {
+    "progress": "node scripts/progress.mjs",
+    "progress:next": "node scripts/progress.mjs --next",
+    "progress:all": "node scripts/progress.mjs --all",
+    "plan:validate": "node scripts/validate-plan.mjs"
+  },
+  "author": "mark@vessl.ai",
+  "license": "UNLICENSED"
+}

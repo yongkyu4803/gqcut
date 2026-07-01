@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vessl.ai/schemas/dev-plan.schema.json",
+  "title": "Video Editor Development Plan",
+  "description": "CapCut 유사 데스크톱 영상 편집기 개발 계획 스키마. 페이즈/단계/체크리스트/검증 루프를 검증한다.",
+  "type": "object",
+  "required": ["meta", "techStack", "phases"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "meta": {
+      "type": "object",
+      "required": ["project", "version", "goal", "coreFeatures"],
+      "additionalProperties": true,
+      "properties": {
+        "project": { "type": "string" },
+        "version": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "targetPlatform": { "type": "string" },
+        "goal": { "type": "string" },
+        "developerLevel": { "type": "string", "enum": ["beginner", "intermediate", "advanced"] },
+        "coreFeatures": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "corePrinciple": { "type": "string" },
+        "usage": { "type": "string" }
+      }
+    },
+    "techStack": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "progressLegend": { "type": "object" },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/phase" }
+    },
+    "globalVerificationGates": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "status": {
+      "type": "string",
+      "enum": ["not_started", "in_progress", "verifying", "done", "blocked"]
+    },
+    "phase": {
+      "type": "object",
+      "required": ["id", "name", "goal", "status", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^phase-[0-9]+$" },
+        "name": { "type": "string" },
+        "goal": { "type": "string" },
+        "estimate": { "type": "string" },
+        "status": { "$ref": "#/definitions/status" },
+        "criticalPath": { "type": "boolean" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/step" }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "name", "status", "checklist", "verification"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "$ref": "#/definitions/status" },
+        "optional": { "type": "boolean" },
+        "criticalRisk": { "type": "string" },
+        "checklist": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/checklistItem" }
+        },
+        "verification": { "$ref": "#/definitions/verification" }
+      }
+    },
+    "checklistItem": {
+      "type": "object",
+      "required": ["id", "task", "done"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "task": { "type": "string" },
+        "done": { "type": "boolean" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["loop", "successCriteria"],
+      "additionalProperties": false,
+      "properties": {
+        "loop": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "successCriteria": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "onFailure": { "type": "string" }
+      }
+    }
+  }
+}
