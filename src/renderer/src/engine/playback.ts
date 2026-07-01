@@ -20,8 +20,14 @@ export class PlaybackController {
   private seekGen = 0
 
   attachCanvas(canvas: HTMLCanvasElement, width: number, height: number): void {
-    this.compositor?.dispose()
-    this.compositor = new Compositor(canvas, width, height)
+    // 같은 캔버스 재부착(React StrictMode 이중 effect 등)이면 컨텍스트를 재사용한다.
+    // dispose(loseContext) 후 같은 캔버스에서 getContext 하면 손실된 컨텍스트가 돌아와 초기화가 실패한다.
+    if (this.compositor && this.compositor.canvas === canvas) {
+      if (this.compositor.width !== width || this.compositor.height !== height) this.compositor.resize(width, height)
+    } else {
+      this.compositor?.dispose()
+      this.compositor = new Compositor(canvas, width, height)
+    }
     void this.seek(useEditor.getState().playhead)
   }
 

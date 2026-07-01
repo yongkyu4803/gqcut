@@ -229,7 +229,7 @@ export function Timeline(): React.JSX.Element {
                     key={clip.id}
                     clip={clip}
                     track={track}
-                    left={HEADER_W + start * pxPerSec}
+                    left={start * pxPerSec} // .track-lane 자체가 헤더(120px) 뒤에서 시작 — 추가 오프셋 없음
                     width={Math.max(2, (end - start) * pxPerSec)}
                     selected={clip.id === selectedClipId}
                     onDown={(e, mode) => beginDrag(e, mode, track, clip)}

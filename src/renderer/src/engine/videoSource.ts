@@ -25,7 +25,8 @@ export class VideoSource {
   private outputQueue: VideoFrame[] = []
   private outputWaiters: Array<() => void> = []
   private current: VideoFrame | null = null
-  private currentCts = -1
+  /** 현재 프레임의 cts — 정수 µs. float 초와 섞어 비교하면 반올림 오차로 프레임 판정이 어긋난다 */
+  private currentCtsUs = -1
   private mutex: Promise<unknown> = Promise.resolve()
   private seekGen = 0
   private pumping = false
@@ -64,15 +65,19 @@ export class VideoSource {
     return this.current
   }
 
-  /** 프레임 정확 접근. 반환 프레임의 소유권은 VideoSource 에 있다(호출자는 즉시 그려야 함). */
-  async getFrameAt(tSec: number): Promise<VideoFrame | null> {
-    const gen = ++this.seekGen
+  /**
+   * 프레임 정확 접근. 반환 프레임의 소유권은 VideoSource 에 있다(호출자는 즉시 그려야 함).
+   * 기본적으로 나중에 온 호출이 이전 호출을 중단시킨다(시크 연타 대응).
+   * noAbort=true 는 중단 없이 끝까지 수행 (썸네일 등 일회성 스냅샷용).
+   */
+  async getFrameAt(tSec: number, opts?: { noAbort?: boolean }): Promise<VideoFrame | null> {
+    const gen = opts?.noAbort ? null : ++this.seekGen
     const run = this.mutex.then(() => this.getFrameAtInner(tSec, gen))
     this.mutex = run.catch(() => null)
     return run
   }
 
-  private async getFrameAtInner(tSec: number, gen: number): Promise<VideoFrame | null> {
+  private async getFrameAtInner(tSec: number, gen: number | null): Promise<VideoFrame | null> {
     if (this.disposed) return null
     const po = this.demuxed.presentationOrder
     if (po.length === 0) return null
@@ -87,23 +92,25 @@ export class VideoSource {
       else hi = mid - 1
     }
     const target = po[lo]
+    // 정수 µs 도메인으로 통일: EncodedVideoChunk.timestamp = round(cts×1e6) 이므로
+    // 같은 반올림을 거치면 디코더 출력 timestamp 와 정확히 일치한다.
+    const targetUs = Math.round(target.cts * 1e6)
 
     // 이미 그 프레임을 들고 있으면 재사용
-    if (this.current && Math.abs(this.currentCts - target.cts) < 1e-9) return this.current
+    if (this.current && this.currentCtsUs === targetUs) return this.current
 
     const keyIdx = this.keyframeBefore(target.decodeIdx)
     const movingForward =
-      this.configuredFromKey && this.nextFeedIdx > keyIdx && target.cts > this.currentCts && this.nextFeedIdx <= target.decodeIdx + REORDER_MARGIN + 1
+      this.configuredFromKey && this.nextFeedIdx > keyIdx && targetUs > this.currentCtsUs && this.nextFeedIdx <= target.decodeIdx + REORDER_MARGIN + 1
 
     if (!movingForward) this.resetTo(keyIdx)
 
     // target 프레젠테이션 프레임이 나올 때까지 feed + drain
-    const targetCts = target.cts
     let fedPastTarget = 0
     for (;;) {
-      if (this.disposed || gen !== this.seekGen) return null
+      if (this.disposed || (gen !== null && gen !== this.seekGen)) return null
 
-      const got = this.drainUpTo(targetCts)
+      const got = this.drainUpTo(targetUs)
       if (got) return got
 
       if (this.nextFeedIdx < this.demuxed.samples.length && fedPastTarget < REORDER_MARGIN) {
@@ -117,38 +124,33 @@ export class VideoSource {
           return null
         }
         this.configuredFromKey = false
-        const got2 = this.drainUpTo(targetCts)
+        const got2 = this.drainUpTo(targetUs)
         return got2 ?? this.current
       }
     }
   }
 
-  /** 출력 큐에서 targetCts 에 도달한 프레임을 찾는다. 지난 프레임은 close. */
-  private drainUpTo(targetCts: number): VideoFrame | null {
+  /** 출력 큐에서 targetUs(µs) 에 도달한 프레임을 찾는다. 지난 프레임은 close. */
+  private drainUpTo(targetUs: number): VideoFrame | null {
     while (this.outputQueue.length > 0) {
       const frame = this.outputQueue[0]
-      const cts = (frame.timestamp ?? 0) / 1e6
-      if (cts <= targetCts + 1e-9) {
+      const ctsUs = frame.timestamp ?? 0
+      if (ctsUs <= targetUs) {
         this.outputQueue.shift()
-        this.setCurrent(frame, cts)
-        // 다음 큐 프레임도 target 이하라면 계속 전진
-        const next = this.outputQueue[0]
-        if (next && (next.timestamp ?? 0) / 1e6 <= targetCts + 1e-9) continue
-        if (Math.abs(cts - targetCts) < 1e-9 || !next) {
-          if (Math.abs(cts - targetCts) < 1e-9) return this.current
-        }
+        this.setCurrent(frame, ctsUs)
+        if (ctsUs === targetUs) return this.current
         continue
       }
-      // 큐 앞이 target 을 지났다 — 현재 들고 있는 게 target 프레임
-      return this.currentCts >= 0 && this.currentCts <= targetCts + 1e-9 ? this.current : null
+      // 큐 앞이 target 을 지났다 — 현재 들고 있는 게 target 직전(=표시할) 프레임
+      return this.currentCtsUs >= 0 && this.currentCtsUs <= targetUs ? this.current : null
     }
-    return this.current && Math.abs(this.currentCts - targetCts) < 1e-9 ? this.current : null
+    return this.current && this.currentCtsUs === targetUs ? this.current : null
   }
 
-  private setCurrent(frame: VideoFrame, cts: number): void {
+  private setCurrent(frame: VideoFrame, ctsUs: number): void {
     if (this.current && this.current !== frame) this.current.close()
     this.current = frame
-    this.currentCts = cts
+    this.currentCtsUs = ctsUs
   }
 
   private async feedOne(): Promise<void> {

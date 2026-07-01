@@ -22,7 +22,8 @@ export function makeThumbnail(filePath: string, kind: 'video' | 'image', tSec = 
           source = bmp
         } else {
           const vs = await getVideoSource(filePath)
-          const frame = await vs.getFrameAt(tSec)
+          // noAbort: 프리뷰 시크와 같은 VideoSource 를 공유하므로 중단 없이 스냅샷
+          const frame = await vs.getFrameAt(tSec, { noAbort: true })
           if (!frame) return null
           srcW = vs.width
           srcH = vs.height
@@ -34,10 +35,15 @@ export function makeThumbnail(filePath: string, kind: 'video' | 'image', tSec = 
         canvas.height = h
         canvas.getContext('2d')!.drawImage(source, 0, 0, width, h)
         return canvas.toDataURL('image/jpeg', 0.7)
-      } catch {
+      } catch (e) {
+        console.warn('[thumbnail] 생성 실패:', filePath, e)
         return null
       }
     })()
+    // 실패(null)는 캐시하지 않는다 — 다음 렌더에서 재시도
+    p.then((url) => {
+      if (!url) cache.delete(key)
+    })
     cache.set(key, p)
   }
   return p

@@ -43,8 +43,8 @@ void main() {
 
 export class Compositor {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas
-  readonly width: number
-  readonly height: number
+  width: number
+  height: number
   private gl: WebGLRenderingContext
   private texture: WebGLTexture
   private uMatrix: WebGLUniformLocation
@@ -163,6 +163,16 @@ export class Compositor {
     gl.uniformMatrix3fv(this.uMatrix, false, m)
     gl.uniform1f(this.uOpacity, Math.max(0, Math.min(1, layer.opacity ?? 1)))
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+  }
+
+  /** 캔버스 크기 변경 — 컨텍스트 재생성 없이 (같은 캔버스는 getContext 가 동일 컨텍스트를 돌려주므로 재생성 불가) */
+  resize(width: number, height: number): void {
+    this.width = width
+    this.height = height
+    this.canvas.width = width
+    this.canvas.height = height
+    this.gl.viewport(0, 0, width, height)
+    this.pixelBuf = null
   }
 
   /** 현재 프레임버퍼를 RGBA 로 읽는다 (내보내기 1.5.2). WebGL 특성상 행이 bottom-up. */
