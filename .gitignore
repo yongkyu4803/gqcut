@@ -40,3 +40,8 @@ samples/
 # 자동저장 / 임시 프로젝트
 *.autosave
 .tmp/
+
+# e2e 산출물
+e2e/.fixtures/
+test-results/
+playwright-report/

@@ -16,9 +16,9 @@
     ],
     "corePrinciple": "프리뷰 엔진(WebCodecs+WebGL, 실시간)과 내보내기 엔진(FFmpeg, 오프라인)을 분리하되, 이펙트/합성 결과는 양쪽이 동일해야 한다(WYSIWYG). WYSIWYG 판정은 정성 비교가 아니라 수치 기준(기준 프레임 SSIM)으로 한다.",
     "revisionNotes": "v0.2.0 (2026-07-02): (1) WebGL 컴포지터를 Phase 4에서 Phase 1.3으로 전진(Canvas2D→WebGL 재작업 제거), (2) 내보내기 파이프라인 스파이크를 Phase 1.5로 전진(WYSIWYG 구조 리스크 조기 검증), (3) 최소 오디오 재생을 1.4(A/V 싱크)에 포함(Phase 2 의존성 역전 해소), (4) 코덱 호환성 fallback을 Phase 0.4로 승격 + VFR 감지를 0.2에 추가, (5) 품질 기준 수치화(SSIM/내보내기 속도), (6) 초기 내보내기 프리셋 H.264+AAC 한정, (7) e2e 스모크(1.6)와 CI 게이트(0.1.6) 추가.",
-    "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다."
+    "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다.",
+    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인."
   },
-
   "techStack": {
     "shell": "Electron",
     "ui": "React + TypeScript",
@@ -27,37 +27,59 @@
     "effectsCompositing": "WebGL (PixiJS 선택 가능)",
     "audioPreview": "Web Audio API",
     "exportRender": "FFmpeg (bundled binary) + ffprobe",
-    "exportRenderHost": "미정 — Phase 1.5 스파이크에서 결정 (숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess)",
+    "exportRenderHost": "확정(1.5 스파이크) — 보이는 렌더러의 OffscreenCanvas. 실측 1080p30 파이프 497MB/s, 2.0x 실시간. 미달 시 YUV 전송/숨김 창 재검토",
     "audioMixdown": "미정 — Phase 5.1에서 결정 (OfflineAudioContext vs FFmpeg 오디오 필터)",
     "bundler": "Vite",
     "testing": "Vitest (unit) + Playwright (e2e)"
   },
-
   "progressLegend": {
     "done": "checklist 항목 완료 여부 (true/false)",
     "status": "step 진행 상태: not_started | in_progress | verifying | done | blocked"
   },
-
   "phases": [
     {
       "id": "phase-0",
       "name": "기반 세팅",
       "goal": "앱 셸을 띄우고 영상 파일을 읽어 첫 프레임을 화면에 그린다. 미지원 코덱/VFR 소스도 호환 프록시로 열 수 있다.",
       "estimate": "2주",
-      "status": "not_started",
+      "status": "verifying",
       "steps": [
         {
           "id": "0.1",
           "name": "프로젝트 스캐폴딩",
           "description": "Electron + React + TS + Vite 보일러플레이트 구성, 메인/렌더러 프로세스 분리.",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "0.1.1", "task": "Electron + Vite + React + TS 프로젝트 생성", "done": false },
-            { "id": "0.1.2", "task": "메인 프로세스 <-> 렌더러 IPC 통신 채널 셋업", "done": false },
-            { "id": "0.1.3", "task": "ESLint + Prettier + tsconfig strict 설정", "done": false },
-            { "id": "0.1.4", "task": "Vitest + Playwright 테스트 러너 설정", "done": false },
-            { "id": "0.1.5", "task": "Git 저장소 + .gitignore + 기본 README 커밋", "done": false },
-            { "id": "0.1.6", "task": "CI 파이프라인 셋업(빌드 + 테스트 + plan:validate 게이트)", "done": false }
+            {
+              "id": "0.1.1",
+              "task": "Electron + Vite + React + TS 프로젝트 생성",
+              "done": true
+            },
+            {
+              "id": "0.1.2",
+              "task": "메인 프로세스 <-> 렌더러 IPC 통신 채널 셋업",
+              "done": true
+            },
+            {
+              "id": "0.1.3",
+              "task": "ESLint + Prettier + tsconfig strict 설정",
+              "done": true
+            },
+            {
+              "id": "0.1.4",
+              "task": "Vitest + Playwright 테스트 러너 설정",
+              "done": true
+            },
+            {
+              "id": "0.1.5",
+              "task": "Git 저장소 + .gitignore + 기본 README 커밋",
+              "done": true
+            },
+            {
+              "id": "0.1.6",
+              "task": "CI 파이프라인 셋업(빌드 + 테스트 + plan:validate 게이트)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -80,12 +102,28 @@
           "id": "0.2",
           "name": "FFmpeg 번들링 + 미디어 프로브",
           "description": "FFmpeg/ffprobe 바이너리를 앱에 번들하고 메인 프로세스에서 실행 가능하게 한다. 프로브 단계에서 코덱 지원 여부와 VFR 여부까지 판별한다.",
-          "status": "not_started",
+          "status": "done",
           "checklist": [
-            { "id": "0.2.1", "task": "플랫폼별 ffmpeg/ffprobe 바이너리 번들 및 경로 해석", "done": false },
-            { "id": "0.2.2", "task": "메인 프로세스에서 ffprobe로 파일 메타데이터(코덱/해상도/fps/duration) 추출", "done": false },
-            { "id": "0.2.3", "task": "IPC로 렌더러에 메타데이터 전달하는 API 작성", "done": false },
-            { "id": "0.2.4", "task": "가변 프레임레이트(VFR) 여부 감지 + WebCodecs 디코딩 지원 여부 판별(코덱별)", "done": false }
+            {
+              "id": "0.2.1",
+              "task": "플랫폼별 ffmpeg/ffprobe 바이너리 번들 및 경로 해석",
+              "done": true
+            },
+            {
+              "id": "0.2.2",
+              "task": "메인 프로세스에서 ffprobe로 파일 메타데이터(코덱/해상도/fps/duration) 추출",
+              "done": true
+            },
+            {
+              "id": "0.2.3",
+              "task": "IPC로 렌더러에 메타데이터 전달하는 API 작성",
+              "done": true
+            },
+            {
+              "id": "0.2.4",
+              "task": "가변 프레임레이트(VFR) 여부 감지 + WebCodecs 디코딩 지원 여부 판별(코덱별)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -106,12 +144,28 @@
           "id": "0.3",
           "name": "파일 임포트 + 첫 프레임 렌더",
           "description": "파일 다이얼로그로 영상을 불러와 WebCodecs로 첫 프레임을 캔버스에 그린다. (임시 Canvas2D 렌더 — Phase 1.3에서 WebGL 컴포지터로 대체)",
-          "status": "not_started",
+          "status": "done",
           "checklist": [
-            { "id": "0.3.1", "task": "파일 열기 다이얼로그 + 드래그앤드롭 임포트", "done": false },
-            { "id": "0.3.2", "task": "MP4 demux 라이브러리 선정(mp4box.js 등 스파이크) + WebCodecs VideoDecoder 초기화", "done": false },
-            { "id": "0.3.3", "task": "첫 키프레임 디코딩 후 canvas에 drawImage", "done": false },
-            { "id": "0.3.4", "task": "썸네일 생성 유틸(특정 timestamp 프레임 추출)", "done": false }
+            {
+              "id": "0.3.1",
+              "task": "파일 열기 다이얼로그 + 드래그앤드롭 임포트",
+              "done": true
+            },
+            {
+              "id": "0.3.2",
+              "task": "MP4 demux 라이브러리 선정(mp4box.js 등 스파이크) + WebCodecs VideoDecoder 초기화",
+              "done": true
+            },
+            {
+              "id": "0.3.3",
+              "task": "첫 키프레임 디코딩 후 canvas에 drawImage",
+              "done": true
+            },
+            {
+              "id": "0.3.4",
+              "task": "썸네일 생성 유틸(특정 timestamp 프레임 추출)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -132,12 +186,24 @@
           "id": "0.4",
           "name": "코덱 호환성 fallback(호환 프록시)",
           "description": "WebCodecs로 디코딩할 수 없는 코덱(예: Windows HEVC)과 VFR 소스를 FFmpeg 트랜스코딩으로 호환 프록시(H.264 CFR)를 만들어 열 수 있게 한다. Phase 1 프리뷰가 모든 소스에서 동작하기 위한 전제조건.",
-          "status": "not_started",
+          "status": "verifying",
           "criticalRisk": "이 fallback 없이는 Windows HEVC 등 흔한 소스에서 Phase 1 재생 검증 자체가 불가능하다",
           "checklist": [
-            { "id": "0.4.1", "task": "WebCodecs 미지원/디코더 초기화 실패 감지 로직(프로브 결과 + 런타임 실패 처리)", "done": false },
-            { "id": "0.4.2", "task": "FFmpeg 트랜스코딩으로 호환 프록시 생성(H.264 + CFR 정규화, VFR 소스 포함)", "done": false },
-            { "id": "0.4.3", "task": "프록시 생성 진행률 표시 + MediaAsset.proxyPath 매핑 + 캐시(재생성 방지)", "done": false }
+            {
+              "id": "0.4.1",
+              "task": "WebCodecs 미지원/디코더 초기화 실패 감지 로직(프로브 결과 + 런타임 실패 처리)",
+              "done": true
+            },
+            {
+              "id": "0.4.2",
+              "task": "FFmpeg 트랜스코딩으로 호환 프록시 생성(H.264 + CFR 정규화, VFR 소스 포함)",
+              "done": true
+            },
+            {
+              "id": "0.4.3",
+              "task": "프록시 생성 진행률 표시 + MediaAsset.proxyPath 매핑 + 캐시(재생성 방지)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -157,27 +223,50 @@
         }
       ]
     },
-
     {
       "id": "phase-1",
       "name": "타임라인 + 프리뷰 MVP + 내보내기 스파이크",
       "goal": "클립을 자르고 이어붙여 끊김 없이 재생하고(소리 포함), 컷 편집만 되는 최소 내보내기로 파이프라인 구조를 조기 검증한다.",
       "estimate": "4-6주",
-      "status": "not_started",
+      "status": "verifying",
       "criticalPath": true,
       "steps": [
         {
           "id": "1.1",
           "name": "데이터 모델 + 상태관리",
           "description": "Project/Track/Clip/MediaAsset 불변 데이터 모델과 명령 기반 undo/redo 구현. (DATA-MODEL.md의 전환 의미론/트랙 볼륨/마스터 볼륨 포함)",
-          "status": "not_started",
+          "status": "done",
           "checklist": [
-            { "id": "1.1.1", "task": "Project/Track/Clip/MediaAsset 타입 정의(TS) — DATA-MODEL.md 준수", "done": false },
-            { "id": "1.1.2", "task": "Zustand 스토어 + immutable 업데이트 규칙", "done": false },
-            { "id": "1.1.3", "task": "커맨드 패턴(execute/undo) + 히스토리 스택", "done": false },
-            { "id": "1.1.4", "task": "프로젝트 JSON 직렬화/역직렬화(save/load)", "done": false },
-            { "id": "1.1.5", "task": "불변식(invariants) 검증 유틸 + 개발 모드 assert", "done": false },
-            { "id": "1.1.6", "task": "모델 조작 함수 유닛 테스트", "done": false }
+            {
+              "id": "1.1.1",
+              "task": "Project/Track/Clip/MediaAsset 타입 정의(TS) — DATA-MODEL.md 준수",
+              "done": true
+            },
+            {
+              "id": "1.1.2",
+              "task": "Zustand 스토어 + immutable 업데이트 규칙",
+              "done": true
+            },
+            {
+              "id": "1.1.3",
+              "task": "커맨드 패턴(execute/undo) + 히스토리 스택",
+              "done": true
+            },
+            {
+              "id": "1.1.4",
+              "task": "프로젝트 JSON 직렬화/역직렬화(save/load)",
+              "done": true
+            },
+            {
+              "id": "1.1.5",
+              "task": "불변식(invariants) 검증 유틸 + 개발 모드 assert",
+              "done": true
+            },
+            {
+              "id": "1.1.6",
+              "task": "모델 조작 함수 유닛 테스트",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -199,14 +288,38 @@
           "id": "1.2",
           "name": "타임라인 UI",
           "description": "트랙/클립을 시각화하고 드래그·트림·분할·스냅·줌 조작을 제공한다.",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "1.2.1", "task": "타임라인 눈금(시간축) + 줌 인/아웃", "done": false },
-            { "id": "1.2.2", "task": "클립 블록 렌더 + 드래그로 위치 이동", "done": false },
-            { "id": "1.2.3", "task": "클립 양 끝 드래그로 트림(in/out 조절)", "done": false },
-            { "id": "1.2.4", "task": "플레이헤드에서 클립 분할(split)", "done": false },
-            { "id": "1.2.5", "task": "스냅(클립 경계/플레이헤드에 자석) + 멀티트랙", "done": false },
-            { "id": "1.2.6", "task": "선택/삭제/복사/붙여넣기 단축키", "done": false }
+            {
+              "id": "1.2.1",
+              "task": "타임라인 눈금(시간축) + 줌 인/아웃",
+              "done": true
+            },
+            {
+              "id": "1.2.2",
+              "task": "클립 블록 렌더 + 드래그로 위치 이동",
+              "done": true
+            },
+            {
+              "id": "1.2.3",
+              "task": "클립 양 끝 드래그로 트림(in/out 조절)",
+              "done": true
+            },
+            {
+              "id": "1.2.4",
+              "task": "플레이헤드에서 클립 분할(split)",
+              "done": true
+            },
+            {
+              "id": "1.2.5",
+              "task": "스냅(클립 경계/플레이헤드에 자석) + 멀티트랙",
+              "done": true
+            },
+            {
+              "id": "1.2.6",
+              "task": "선택/삭제/복사/붙여넣기 단축키",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -227,12 +340,28 @@
           "id": "1.3",
           "name": "WebGL 프리뷰 컴포지터(기초)",
           "description": "프리뷰 렌더를 처음부터 WebGL 텍스처 합성으로 구축한다(0.3의 임시 Canvas2D 렌더 대체). Phase 3 텍스트, Phase 4 필터/전환, Phase 5 내보내기가 모두 이 컴포지터 위에 쌓이므로 재작업을 원천 차단한다.",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "1.3.1", "task": "WebGL 컨텍스트 + 단일 프레임 텍스처 렌더(0.3 Canvas2D 대체)", "done": false },
-            { "id": "1.3.2", "task": "클립 transform(위치/크기/회전/투명도) 셰이더 적용", "done": false },
-            { "id": "1.3.3", "task": "다중 레이어 합성(블렌딩) 순서 처리", "done": false },
-            { "id": "1.3.4", "task": "색공간(sRGB↔linear) / premultiplied alpha 일관 처리 규칙 수립 + 문서화", "done": false }
+            {
+              "id": "1.3.1",
+              "task": "WebGL 컨텍스트 + 단일 프레임 텍스처 렌더(0.3 Canvas2D 대체)",
+              "done": true
+            },
+            {
+              "id": "1.3.2",
+              "task": "클립 transform(위치/크기/회전/투명도) 셰이더 적용",
+              "done": true
+            },
+            {
+              "id": "1.3.3",
+              "task": "다중 레이어 합성(블렌딩) 순서 처리",
+              "done": true
+            },
+            {
+              "id": "1.3.4",
+              "task": "색공간(sRGB↔linear) / premultiplied alpha 일관 처리 규칙 수립 + 문서화",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -253,17 +382,49 @@
           "id": "1.4",
           "name": "재생 엔진 + A/V 동기화",
           "description": "WebCodecs로 타임라인을 실시간 재생하고 오디오-비디오를 동기화한다. 비디오 클립의 소리 재생(최소 경로)을 포함한다 — 이것 없이는 A/V 싱크 검증이 불가능하다.",
-          "status": "not_started",
+          "status": "verifying",
           "criticalRisk": "프레임 정확 시크와 A/V 동기화가 가장 어려운 구간",
           "checklist": [
-            { "id": "1.4.1", "task": "재생 루프(requestVideoFrameCallback 기반) 구현", "done": false },
-            { "id": "1.4.2", "task": "타임라인 시간 -> 클립/소스 프레임 매핑", "done": false },
-            { "id": "1.4.3", "task": "프레임 디코딩 캐시/프리페치(버퍼링)", "done": false },
-            { "id": "1.4.4", "task": "키프레임 기반 정확 시크(seek)", "done": false },
-            { "id": "1.4.5", "task": "비디오 클립 오디오 트랙 디코딩 + 재생(최소 단일 경로 — 믹싱/페이드는 Phase 2)", "done": false },
-            { "id": "1.4.6", "task": "오디오 클럭(AudioContext.currentTime) 기준 A/V 동기화", "done": false },
-            { "id": "1.4.7", "task": "재생/일시정지/스크럽/속도 제어", "done": false },
-            { "id": "1.4.8", "task": "클립 경계 전환 시 끊김 없는 재생", "done": false }
+            {
+              "id": "1.4.1",
+              "task": "재생 루프(rAF 기반 — rVFC 는 <video> 전용 API 라 캔버스 합성 루프에는 rAF 채택) 구현",
+              "done": true
+            },
+            {
+              "id": "1.4.2",
+              "task": "타임라인 시간 -> 클립/소스 프레임 매핑",
+              "done": true
+            },
+            {
+              "id": "1.4.3",
+              "task": "프레임 디코딩 캐시/프리페치(버퍼링)",
+              "done": true
+            },
+            {
+              "id": "1.4.4",
+              "task": "키프레임 기반 정확 시크(seek)",
+              "done": true
+            },
+            {
+              "id": "1.4.5",
+              "task": "비디오 클립 오디오 트랙 디코딩 + 재생(최소 단일 경로 — 믹싱/페이드는 Phase 2)",
+              "done": true
+            },
+            {
+              "id": "1.4.6",
+              "task": "오디오 클럭(AudioContext.currentTime) 기준 A/V 동기화",
+              "done": true
+            },
+            {
+              "id": "1.4.7",
+              "task": "재생/일시정지/스크럽/속도 제어",
+              "done": true
+            },
+            {
+              "id": "1.4.8",
+              "task": "클립 경계 전환 시 끊김 없는 재생",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -286,13 +447,29 @@
           "id": "1.5",
           "name": "내보내기 파이프라인 스파이크 (walking skeleton)",
           "description": "컷 편집만 되는 최소 내보내기를 만들어 '프레임 렌더 -> FFmpeg 파이프' 구조의 실행 위치와 처리량을 조기 검증한다. 여기서 확정한 구조가 Phase 5의 뼈대가 된다. 색공간 불일치·파이프 병목 같은 구조적 결함을 12주차가 아니라 지금 발견하는 것이 목적.",
-          "status": "not_started",
+          "status": "done",
           "criticalRisk": "WYSIWYG(프리뷰=결과물)와 프레임 전송 처리량(1080p30 RGBA ≈ 초당 250MB)의 구조적 리스크를 조기 검증하는 단계",
           "checklist": [
-            { "id": "1.5.1", "task": "렌더 실행 위치 결정(숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess) + ARCHITECTURE.md 반영", "done": false },
-            { "id": "1.5.2", "task": "OffscreenCanvas(WebGL, 1.3 컴포지터 재사용) 프레임 렌더 -> FFmpeg stdin 파이프 인코딩(컷 편집만)", "done": false },
-            { "id": "1.5.3", "task": "프레임 전송 처리량 측정(1080p30 기준) + 병목 시 대안 평가(YUV 변환/transferable/공유 메모리)", "done": false },
-            { "id": "1.5.4", "task": "오디오 단일 트랙 패스스루 mux(스파이크 범위 — 믹스다운은 Phase 5)", "done": false }
+            {
+              "id": "1.5.1",
+              "task": "렌더 실행 위치 결정(숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess) + ARCHITECTURE.md 반영",
+              "done": true
+            },
+            {
+              "id": "1.5.2",
+              "task": "OffscreenCanvas(WebGL, 1.3 컴포지터 재사용) 프레임 렌더 -> FFmpeg stdin 파이프 인코딩(컷 편집만)",
+              "done": true
+            },
+            {
+              "id": "1.5.3",
+              "task": "프레임 전송 처리량 측정(1080p30 기준) + 병목 시 대안 평가(YUV 변환/transferable/공유 메모리)",
+              "done": true
+            },
+            {
+              "id": "1.5.4",
+              "task": "오디오 단일 트랙 패스스루 mux(스파이크 범위 — 믹스다운은 Phase 5)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -316,11 +493,23 @@
           "id": "1.6",
           "name": "e2e 스모크 + 회귀 게이트",
           "description": "임포트→컷→재생→내보내기(스파이크)를 관통하는 Playwright 스모크를 만들어 이후 모든 phase의 회귀 게이트로 사용한다. (globalVerificationGates의 '전체 회귀 테스트' 실체)",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "1.6.1", "task": "Playwright 스모크: 임포트 -> 컷 편집 -> 재생 -> 내보내기까지 1개 시나리오", "done": false },
-            { "id": "1.6.2", "task": "모델/커맨드 유닛테스트 + 스모크를 CI 게이트에 연결", "done": false },
-            { "id": "1.6.3", "task": "스모크 실패 시 phase 진행을 막는 규칙을 README/CI에 명문화", "done": false }
+            {
+              "id": "1.6.1",
+              "task": "Playwright 스모크: 임포트 -> 컷 편집 -> 재생 -> 내보내기까지 1개 시나리오",
+              "done": true
+            },
+            {
+              "id": "1.6.2",
+              "task": "모델/커맨드 유닛테스트 + 스모크를 CI 게이트에 연결",
+              "done": true
+            },
+            {
+              "id": "1.6.3",
+              "task": "스모크 실패 시 phase 진행을 막는 규칙을 README/CI에 명문화",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -337,23 +526,34 @@
         }
       ]
     },
-
     {
       "id": "phase-2",
       "name": "오디오 / 배경음악",
       "goal": "1.4의 최소 오디오 재생 경로를 확장해 파형·볼륨/페이드·다중 트랙 믹싱을 완성한다.",
       "estimate": "2주",
-      "status": "not_started",
+      "status": "verifying",
       "steps": [
         {
           "id": "2.1",
           "name": "오디오 트랙 + 파형",
           "description": "오디오 클립을 타임라인에 배치하고 파형을 시각화한다.",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "2.1.1", "task": "오디오 파일 임포트 + 디코딩(AudioBuffer)", "done": false },
-            { "id": "2.1.2", "task": "파형(waveform) 데이터 생성 + 렌더", "done": false },
-            { "id": "2.1.3", "task": "오디오 전용 트랙 타입 + 클립 배치/트림", "done": false }
+            {
+              "id": "2.1.1",
+              "task": "오디오 파일 임포트 + 디코딩(AudioBuffer)",
+              "done": true
+            },
+            {
+              "id": "2.1.2",
+              "task": "파형(waveform) 데이터 생성 + 렌더",
+              "done": true
+            },
+            {
+              "id": "2.1.3",
+              "task": "오디오 전용 트랙 타입 + 클립 배치/트림",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -372,12 +572,28 @@
           "id": "2.2",
           "name": "믹싱 + 볼륨/페이드",
           "description": "Web Audio API로 다중 트랙을 믹싱하고 클립/트랙/마스터 볼륨과 페이드를 적용한다. (1.4.5의 단일 경로를 다중 트랙 그래프로 확장)",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "2.2.1", "task": "Web Audio 그래프(클립 GainNode -> 트랙 GainNode -> 마스터 GainNode) 구성", "done": false },
-            { "id": "2.2.2", "task": "클립별/트랙별 볼륨 + 마스터 볼륨(데이터 모델 volume/masterVolume 필드 연동)", "done": false },
-            { "id": "2.2.3", "task": "페이드 인/아웃(볼륨 automation)", "done": false },
-            { "id": "2.2.4", "task": "재생 엔진과 오디오 타임라인 동기화(1.4 A/V 싱크 유지 확인)", "done": false }
+            {
+              "id": "2.2.1",
+              "task": "Web Audio 그래프(클립 GainNode -> 트랙 GainNode -> 마스터 GainNode) 구성",
+              "done": true
+            },
+            {
+              "id": "2.2.2",
+              "task": "클립별/트랙별 볼륨 + 마스터 볼륨(데이터 모델 volume/masterVolume 필드 연동)",
+              "done": true
+            },
+            {
+              "id": "2.2.3",
+              "task": "페이드 인/아웃(볼륨 automation)",
+              "done": true
+            },
+            {
+              "id": "2.2.4",
+              "task": "재생 엔진과 오디오 타임라인 동기화(1.4 A/V 싱크 유지 확인)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -397,25 +613,44 @@
         }
       ]
     },
-
     {
       "id": "phase-3",
       "name": "자막 / 텍스트",
       "goal": "텍스트 레이어를 WebGL 컴포지터 위에 추가하고 스타일·애니메이션을 적용한다. (선택: 자동 자막)",
       "estimate": "2주",
-      "status": "not_started",
+      "status": "verifying",
       "steps": [
         {
           "id": "3.1",
           "name": "텍스트 레이어 + 스타일",
           "description": "텍스트 클립을 타임라인에 추가하고 프리뷰 위에 오버레이한다. 텍스트는 Canvas2D로 래스터한 뒤 WebGL 텍스처로 업로드해 1.3 컴포지터의 레이어로 합성한다(내보내기에서 동일 경로 재사용 → 재작업 없음).",
-          "status": "not_started",
+          "status": "verifying",
           "checklist": [
-            { "id": "3.1.1", "task": "텍스트 클립 타입 + 타임라인 배치", "done": false },
-            { "id": "3.1.2", "task": "텍스트 래스터(Canvas2D) -> WebGL 텍스처 업로드 렌더(폰트/크기/색/정렬)", "done": false },
-            { "id": "3.1.3", "task": "외곽선/그림자/배경 박스 스타일", "done": false },
-            { "id": "3.1.4", "task": "화면에서 드래그로 위치/크기 조절", "done": false },
-            { "id": "3.1.5", "task": "등장/퇴장 애니메이션(fade/slide 등)", "done": false }
+            {
+              "id": "3.1.1",
+              "task": "텍스트 클립 타입 + 타임라인 배치",
+              "done": true
+            },
+            {
+              "id": "3.1.2",
+              "task": "텍스트 래스터(Canvas2D) -> WebGL 텍스처 업로드 렌더(폰트/크기/색/정렬)",
+              "done": true
+            },
+            {
+              "id": "3.1.3",
+              "task": "외곽선/그림자/배경 박스 스타일",
+              "done": true
+            },
+            {
+              "id": "3.1.4",
+              "task": "화면에서 드래그로 위치/크기 조절",
+              "done": true
+            },
+            {
+              "id": "3.1.5",
+              "task": "등장/퇴장 애니메이션(fade/slide 등)",
+              "done": true
+            }
           ],
           "verification": {
             "loop": [
@@ -439,10 +674,26 @@
           "status": "not_started",
           "optional": true,
           "checklist": [
-            { "id": "3.2.1", "task": "STT 엔진 선택(Whisper 로컬 or API)", "done": false },
-            { "id": "3.2.2", "task": "오디오 추출 -> STT -> 타임코드 있는 자막 생성", "done": false },
-            { "id": "3.2.3", "task": "생성된 자막을 텍스트 클립으로 자동 배치", "done": false },
-            { "id": "3.2.4", "task": "자막 편집/재정렬 UI", "done": false }
+            {
+              "id": "3.2.1",
+              "task": "STT 엔진 선택(Whisper 로컬 or API)",
+              "done": false
+            },
+            {
+              "id": "3.2.2",
+              "task": "오디오 추출 -> STT -> 타임코드 있는 자막 생성",
+              "done": false
+            },
+            {
+              "id": "3.2.3",
+              "task": "생성된 자막을 텍스트 클립으로 자동 배치",
+              "done": false
+            },
+            {
+              "id": "3.2.4",
+              "task": "자막 편집/재정렬 UI",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -459,7 +710,6 @@
         }
       ]
     },
-
     {
       "id": "phase-4",
       "name": "효과 / 전환 / 필터",
@@ -474,10 +724,26 @@
           "status": "not_started",
           "criticalRisk": "여기서 만든 효과는 Phase 5 내보내기에서 동일하게 재현되어야 함(WYSIWYG) — 셰이더 정의를 shared/effects-spec 한 곳에만 둔다",
           "checklist": [
-            { "id": "4.1.1", "task": "shared/effects-spec 이펙트 파라미터 규격 + 셰이더 정의(프리뷰·내보내기 공유 단일 소스)", "done": false },
-            { "id": "4.1.2", "task": "기본 필터 셰이더(밝기/대비/채도/색온도)", "done": false },
-            { "id": "4.1.3", "task": "필터 파라미터 UI + 실시간 프리뷰", "done": false },
-            { "id": "4.1.4", "task": "이펙트 파라미터를 데이터 모델에 직렬화(save/load 복원)", "done": false }
+            {
+              "id": "4.1.1",
+              "task": "shared/effects-spec 이펙트 파라미터 규격 + 셰이더 정의(프리뷰·내보내기 공유 단일 소스)",
+              "done": false
+            },
+            {
+              "id": "4.1.2",
+              "task": "기본 필터 셰이더(밝기/대비/채도/색온도)",
+              "done": false
+            },
+            {
+              "id": "4.1.3",
+              "task": "필터 파라미터 UI + 실시간 프리뷰",
+              "done": false
+            },
+            {
+              "id": "4.1.4",
+              "task": "이펙트 파라미터를 데이터 모델에 직렬화(save/load 복원)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -500,10 +766,26 @@
           "status": "not_started",
           "criticalRisk": "전환 구간은 두 클립의 프레임이 동시에 필요 — 소스 핸들(여유분) 부족 시 프레임 홀드 fallback 규칙을 프리뷰·내보내기가 동일하게 적용해야 WYSIWYG가 유지된다",
           "checklist": [
-            { "id": "4.2.1", "task": "전환 시간 의미론 구현(DATA-MODEL 핸들 규칙: 소스 여유분 확인 + 부족 시 프레임 홀드)", "done": false },
-            { "id": "4.2.2", "task": "전환 셰이더(디졸브/와이프/슬라이드) — progress 0~1 보간", "done": false },
-            { "id": "4.2.3", "task": "전환 UI(클립 경계에 배치, 길이 조절) + 데이터 모델 직렬화", "done": false },
-            { "id": "4.2.4", "task": "WYSIWYG 기준 프레임 캡처(필터/전환/텍스트 포함 — Phase 5 픽셀 비교용)", "done": false }
+            {
+              "id": "4.2.1",
+              "task": "전환 시간 의미론 구현(DATA-MODEL 핸들 규칙: 소스 여유분 확인 + 부족 시 프레임 홀드)",
+              "done": false
+            },
+            {
+              "id": "4.2.2",
+              "task": "전환 셰이더(디졸브/와이프/슬라이드) — progress 0~1 보간",
+              "done": false
+            },
+            {
+              "id": "4.2.3",
+              "task": "전환 UI(클립 경계에 배치, 길이 조절) + 데이터 모델 직렬화",
+              "done": false
+            },
+            {
+              "id": "4.2.4",
+              "task": "WYSIWYG 기준 프레임 캡처(필터/전환/텍스트 포함 — Phase 5 픽셀 비교용)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -522,7 +804,6 @@
         }
       ]
     },
-
     {
       "id": "phase-5",
       "name": "내보내기 엔진 (스파이크 확장)",
@@ -537,9 +818,21 @@
           "description": "1.5에서 확정한 구조 위에서, 타임라인 전체(이펙트/텍스트/전환 포함)를 프레임 렌더 명세와 오디오 믹스다운 명세로 변환한다.",
           "status": "not_started",
           "checklist": [
-            { "id": "5.1.1", "task": "타임라인 -> 프레임 시퀀스 명세 생성(경계는 프레임 인덱스로 스냅, 이펙트/텍스트/전환 포함)", "done": false },
-            { "id": "5.1.2", "task": "오디오 믹스다운 경로 결정(OfflineAudioContext vs FFmpeg 오디오 필터) + TECH-STACK.md 기록", "done": false },
-            { "id": "5.1.3", "task": "오디오 믹스다운 명세 생성(클립/트랙/마스터 볼륨 + 페이드 반영)", "done": false }
+            {
+              "id": "5.1.1",
+              "task": "타임라인 -> 프레임 시퀀스 명세 생성(경계는 프레임 인덱스로 스냅, 이펙트/텍스트/전환 포함)",
+              "done": false
+            },
+            {
+              "id": "5.1.2",
+              "task": "오디오 믹스다운 경로 결정(OfflineAudioContext vs FFmpeg 오디오 필터) + TECH-STACK.md 기록",
+              "done": false
+            },
+            {
+              "id": "5.1.3",
+              "task": "오디오 믹스다운 명세 생성(클립/트랙/마스터 볼륨 + 페이드 반영)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -562,11 +855,31 @@
           "status": "not_started",
           "criticalRisk": "프리뷰와 결과물 불일치가 이 단계의 핵심 리스크 — 구조 리스크는 1.5에서 제거됐으므로 여기서는 이펙트 재현 정확도에 집중",
           "checklist": [
-            { "id": "5.2.1", "task": "프레임 렌더(1.3/4.x 컴포지터+effects-spec 재사용) -> FFmpeg stdin 파이프 인코딩", "done": false },
-            { "id": "5.2.2", "task": "오디오 믹스다운 + 비디오 mux", "done": false },
-            { "id": "5.2.3", "task": "진행률 표시 + 취소 기능(프로세스 종료 + 임시파일 정리)", "done": false },
-            { "id": "5.2.4", "task": "해상도/비트레이트 프리셋(초기 H.264+AAC/MP4 한정)", "done": false },
-            { "id": "5.2.5", "task": "기준 프레임 SSIM 자동 비교 스크립트(4.2.4 캡처본 vs 출력 프레임)", "done": false }
+            {
+              "id": "5.2.1",
+              "task": "프레임 렌더(1.3/4.x 컴포지터+effects-spec 재사용) -> FFmpeg stdin 파이프 인코딩",
+              "done": false
+            },
+            {
+              "id": "5.2.2",
+              "task": "오디오 믹스다운 + 비디오 mux",
+              "done": false
+            },
+            {
+              "id": "5.2.3",
+              "task": "진행률 표시 + 취소 기능(프로세스 종료 + 임시파일 정리)",
+              "done": false
+            },
+            {
+              "id": "5.2.4",
+              "task": "해상도/비트레이트 프리셋(초기 H.264+AAC/MP4 한정)",
+              "done": false
+            },
+            {
+              "id": "5.2.5",
+              "task": "기준 프레임 SSIM 자동 비교 스크립트(4.2.4 캡처본 vs 출력 프레임)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -589,7 +902,6 @@
         }
       ]
     },
-
     {
       "id": "phase-6",
       "name": "제품화",
@@ -603,9 +915,21 @@
           "description": "프로젝트 파일 저장/열기, 자동저장, 미디어 상대경로 관리.",
           "status": "not_started",
           "checklist": [
-            { "id": "6.1.1", "task": "프로젝트 파일(.proj) 저장/열기", "done": false },
-            { "id": "6.1.2", "task": "자동저장 + 크래시 복구", "done": false },
-            { "id": "6.1.3", "task": "미디어 경로 관리(이동/누락 파일 재연결)", "done": false }
+            {
+              "id": "6.1.1",
+              "task": "프로젝트 파일(.proj) 저장/열기",
+              "done": false
+            },
+            {
+              "id": "6.1.2",
+              "task": "자동저장 + 크래시 복구",
+              "done": false
+            },
+            {
+              "id": "6.1.3",
+              "task": "미디어 경로 관리(이동/누락 파일 재연결)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -626,10 +950,26 @@
           "description": "고해상도 편집을 위한 성능용 프록시(0.4 호환 프록시 인프라 재사용·확장), 캐시, 크래시 대응.",
           "status": "not_started",
           "checklist": [
-            { "id": "6.2.1", "task": "성능용 프록시(고해상도 소스 -> 저해상도 편집) — 0.4 인프라 확장, 내보내기 시 원본 전환", "done": false },
-            { "id": "6.2.2", "task": "프레임/썸네일 캐시 정책(LRU 상한)", "done": false },
-            { "id": "6.2.3", "task": "에러 바운더리 + 크래시 리포팅", "done": false },
-            { "id": "6.2.4", "task": "메모리 사용량 모니터링/상한", "done": false }
+            {
+              "id": "6.2.1",
+              "task": "성능용 프록시(고해상도 소스 -> 저해상도 편집) — 0.4 인프라 확장, 내보내기 시 원본 전환",
+              "done": false
+            },
+            {
+              "id": "6.2.2",
+              "task": "프레임/썸네일 캐시 정책(LRU 상한)",
+              "done": false
+            },
+            {
+              "id": "6.2.3",
+              "task": "에러 바운더리 + 크래시 리포팅",
+              "done": false
+            },
+            {
+              "id": "6.2.4",
+              "task": "메모리 사용량 모니터링/상한",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -651,10 +991,26 @@
           "description": "코드사이닝, 인스톨러, 자동 업데이트, 라이선스.",
           "status": "not_started",
           "checklist": [
-            { "id": "6.3.1", "task": "electron-builder 패키징(mac/win)", "done": false },
-            { "id": "6.3.2", "task": "코드사이닝 + 공증(notarization)", "done": false },
-            { "id": "6.3.3", "task": "자동 업데이트(electron-updater)", "done": false },
-            { "id": "6.3.4", "task": "라이선스 정리(FFmpeg LGPL/GPL 빌드 구분, 폰트, H.265 인코딩 도입 시 특허 라이선스 검토)", "done": false }
+            {
+              "id": "6.3.1",
+              "task": "electron-builder 패키징(mac/win)",
+              "done": false
+            },
+            {
+              "id": "6.3.2",
+              "task": "코드사이닝 + 공증(notarization)",
+              "done": false
+            },
+            {
+              "id": "6.3.3",
+              "task": "자동 업데이트(electron-updater)",
+              "done": false
+            },
+            {
+              "id": "6.3.4",
+              "task": "라이선스 정리(FFmpeg LGPL/GPL 빌드 구분, 폰트, H.265 인코딩 도입 시 특허 라이선스 검토)",
+              "done": false
+            }
           ],
           "verification": {
             "loop": [
@@ -673,7 +1029,6 @@
       ]
     }
   ],
-
   "globalVerificationGates": [
     "각 step은 checklist 전부 done=true 이고 verification.successCriteria 를 모두 만족해야 status=done 으로 전환한다.",
     "criticalPath=true 인 phase는 다음 phase 진입 전 1.6 e2e 스모크를 포함한 전체 회귀 테스트(재생/편집/내보내기)를 통과해야 한다. (1.6 완성 전에는 수동 스모크로 대체)",

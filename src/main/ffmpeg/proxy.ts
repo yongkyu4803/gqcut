@@ -1,0 +1,119 @@
+/**
+ * 코덱 호환성 fallback — 호환 프록시 생성 (0.4)
+ * WebCodecs 미지원 코덱·VFR 소스를 H.264 CFR 로 트랜스코딩해 편집 가능하게 한다.
+ * - GOP 30 (1초 간격 키프레임) → 시크 성능 확보
+ * - 캐시: 소스 경로+mtime 해시로 재생성 방지 (0.4.3)
+ */
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { app } from 'electron'
+import { existsSync, statSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { ffmpegPath } from './binaries'
+
+export function cacheDir(sub: string): string {
+  const dir = join(app.getPath('userData'), 'cache', sub)
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+export function cacheKey(sourcePath: string): string {
+  const mtime = statSync(sourcePath).mtimeMs
+  return createHash('sha1').update(`${sourcePath}:${mtime}`).digest('hex').slice(0, 16)
+}
+
+export interface ProxyJob {
+  cancel(): void
+  promise: Promise<string>
+}
+
+/**
+ * 호환 프록시 생성. onProgress 는 0~100.
+ * 프록시 스펙: H.264 yuv420p, CFR(원본 avg fps 반올림 또는 30), GOP=fps(1초), faststart.
+ */
+export function makeCompatProxy(
+  sourcePath: string,
+  durationSec: number,
+  fps: number,
+  onProgress: (percent: number) => void
+): ProxyJob {
+  const outPath = join(cacheDir('proxy'), `${cacheKey(sourcePath)}.mp4`)
+  if (existsSync(outPath)) {
+    onProgress(100)
+    return { cancel: () => {}, promise: Promise.resolve(outPath) }
+  }
+
+  const gop = Math.max(1, Math.round(fps))
+  const args = [
+    '-y',
+    '-i', sourcePath,
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+    '-pix_fmt', 'yuv420p',
+    // 색공간 정규화: Chromium 은 BT.601 태그를 무시하므로 프록시는 항상 BT.709 로 통일 (WYSIWYG)
+    '-vf', 'scale=in_color_matrix=auto:out_color_matrix=bt709:out_range=tv',
+    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
+    '-vsync', 'cfr', '-r', String(gop), // CFR 정규화 (VFR → 고정 fps)
+    '-g', String(gop), '-keyint_min', String(gop),
+    '-c:a', 'aac', '-b:a', '192k',
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats',
+    outPath
+  ]
+
+  const child = spawn(ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  let stderrTail = ''
+  child.stderr.on('data', (d: Buffer) => {
+    stderrTail = (stderrTail + d.toString()).slice(-2000)
+  })
+  child.stdout.on('data', (d: Buffer) => {
+    // -progress 출력에서 out_time_us 파싱
+    const m = /out_time_us=(\d+)/.exec(d.toString())
+    if (m && durationSec > 0) {
+      const pct = Math.min(99, (Number(m[1]) / 1e6 / durationSec) * 100)
+      onProgress(pct)
+    }
+  })
+
+  const promise = new Promise<string>((resolvePromise, reject) => {
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        onProgress(100)
+        resolvePromise(outPath)
+      } else {
+        reject(new Error(`프록시 생성 실패 (ffmpeg exit ${code}): ${stderrTail.split('\n').slice(-3).join(' ')}`))
+      }
+    })
+  })
+
+  return { cancel: () => child.kill('SIGKILL'), promise }
+}
+
+/**
+ * 오디오 트랙을 wav(pcm f32le) 로 추출 — 재생/파형/믹스다운 공용 (1.4.5, 2.1)
+ * 오디오가 없으면 null.
+ */
+export async function extractAudioWav(sourcePath: string, sampleRate: number): Promise<string | null> {
+  const outPath = join(cacheDir('audio'), `${cacheKey(sourcePath)}_${sampleRate}.wav`)
+  if (existsSync(outPath)) return outPath
+
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(ffmpegPath(), [
+      '-y', '-i', sourcePath,
+      '-vn', '-map', '0:a:0',
+      '-acodec', 'pcm_f32le', '-ar', String(sampleRate), '-ac', '2',
+      outPath
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderrTail = ''
+    child.stderr.on('data', (d: Buffer) => {
+      stderrTail = (stderrTail + d.toString()).slice(-2000)
+    })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolvePromise(outPath)
+      else if (/does not contain any stream|matches no streams/i.test(stderrTail)) resolvePromise(null)
+      else reject(new Error(`오디오 추출 실패: ${stderrTail.split('\n').slice(-2).join(' ')}`))
+    })
+  })
+}

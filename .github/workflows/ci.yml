@@ -1,0 +1,23 @@
+# CI 게이트 (0.1.6): 계획 검증 + 타입체크 + 유닛테스트 + 빌드 + e2e 스모크 (1.6.2)
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run plan:validate
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+      # e2e 스모크 (1.6.3): 실패 시 phase 진행 불가
+      - run: npm run e2e

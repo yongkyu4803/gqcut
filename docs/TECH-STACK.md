@@ -68,11 +68,17 @@
 - **electron-builder + electron-updater**: 패키징/코드사이닝/자동 업데이트
 
 ## 7. 미정 / 후속 결정 필요
-- **내보내기 렌더 실행 위치** (숨김 BrowserWindow vs 기존 렌더러 vs UtilityProcess) + 프레임 전송 경로 — **Phase 1.5 스파이크에서 확정** (ARCHITECTURE §6.1~6.2)
-- **오디오 믹스다운 경로** (OfflineAudioContext vs FFmpeg 오디오 필터) — **Phase 5.1에서 확정**
+
+확정됨 (2026-07-02, Phase 0~3 구현):
+- ~~내보내기 렌더 실행 위치~~ → **보이는 렌더러의 OffscreenCanvas** (1.5 스파이크 실측: 파이프 497MB/s, 2.0× 실시간 — ARCHITECTURE §6.1~6.2)
+- ~~MP4 demuxer~~ → **mp4box.js** (0.3에서 확정 — demux + avcC/hvcC description 추출)
+- ~~호환 프록시 파라미터~~ → **H.264 CRF20 / GOP=fps(1초) / CFR / BT.709 정규화** (0.4)
+- (신규 결정) 재생 루프는 **rAF** — rVFC 는 `<video>` 전용 API 라 캔버스 합성 루프에 부적합
+- (신규 결정) 색공간: Chromium 이 BT.601 태그를 무시하므로 **모든 소스를 BT.709 로 정규화** (ARCHITECTURE §6.3)
+
+남은 미정:
+- **오디오 믹스다운 경로** (OfflineAudioContext vs FFmpeg 오디오 필터) — **Phase 5.1에서 확정** (스파이크는 FFmpeg atrim+concat 패스스루)
 - 자동 자막(STT) 엔진: Whisper 로컬 vs 클라우드 API — 비용/프라이버시/정확도 트레이드오프 (Phase 3.2에서 결정)
-- MP4 demuxer 라이브러리 선정 (mp4box.js 등) — Phase 0.3 스파이크에서 확정
-- 호환 프록시 트랜스코딩 파라미터(GOP/키프레임 간격 — 시크 성능 직결) — Phase 0.4에서 확정
 - 성능용 프록시 코덱/해상도 정책 — Phase 6.2에서 확정 (0.4 호환 프록시 인프라 재사용)
 - H.265 인코딩 프리셋 도입 여부(특허 라이선스 검토) — Phase 6.3 이전 결정
 

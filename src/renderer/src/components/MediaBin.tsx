@@ -1,0 +1,93 @@
+/**
+ * 미디어 빈 — 임포트(다이얼로그 + 드래그앤드롭 0.3.1), 자산 목록, 타임라인 배치, 프록시 진행률(0.4.3)
+ */
+import { useCallback, useEffect, useState } from 'react'
+import type { MediaAsset } from '@shared/model/types'
+import { createMediaClip } from '@shared/model/factory'
+import { useEditor } from '@renderer/state/store'
+import { addClip, projectDuration } from '@renderer/state/commands'
+import { importFile, importViaDialog } from '@renderer/media/import'
+import { makeThumbnail } from '@renderer/engine/thumbnail'
+
+export function MediaBin(): React.JSX.Element {
+  const project = useEditor((s) => s.project)
+  const proxyJobs = useEditor((s) => s.proxyJobs)
+  const dispatch = useEditor((s) => s.dispatch)
+
+  const addToTimeline = useCallback(
+    (asset: MediaAsset): void => {
+      const targetKind = asset.kind === 'audio' ? 'audio' : 'video'
+      const track = project.tracks.find((t) => t.kind === targetKind)
+      if (!track) return
+      const end = Math.max(0, ...track.clips.map((c) => c.timelineEnd))
+      dispatch('타임라인에 추가', (p) => addClip(p, track.id, createMediaClip(asset, end)))
+      void projectDuration
+    },
+    [project, dispatch]
+  )
+
+  const onDrop = async (e: React.DragEvent): Promise<void> => {
+    e.preventDefault()
+    for (const f of Array.from(e.dataTransfer.files)) {
+      const path = window.electronFilePath?.(f) ?? (f as unknown as { path?: string }).path
+      if (path) {
+        try {
+          await importFile(path)
+        } catch (err) {
+          alert(`임포트 실패: ${err instanceof Error ? err.message : err}`)
+        }
+      }
+    }
+  }
+
+  return (
+    <div className="media-bin" onDrop={onDrop} onDragOver={(e) => e.preventDefault()} data-testid="media-bin">
+      <button className="btn primary" onClick={() => void importViaDialog()} data-testid="import-btn">
+        + 미디어 임포트
+      </button>
+      <div className="asset-list">
+        {project.assets.map((asset) => (
+          <div key={asset.id} className="asset-card" data-testid={`asset-${asset.id}`}>
+            {(asset.kind === 'video' || asset.kind === 'image') && <Thumb asset={asset} />}
+            <div className="asset-name" title={asset.path}>
+              {asset.path.split('/').pop()}
+            </div>
+            <div className="asset-meta">
+              {asset.kind} · {asset.duration.toFixed(1)}s
+              {asset.width ? ` · ${asset.width}×${asset.height}` : ''}
+              {asset.vfr ? ' · VFR' : ''}
+              {asset.proxyPath ? ' · 프록시' : ''}
+            </div>
+            {proxyJobs[asset.id] !== undefined ? (
+              <div className="proxy-progress">
+                <div className="bar" style={{ width: `${proxyJobs[asset.id]}%` }} />
+                <span>호환 프록시 생성 중 {Math.round(proxyJobs[asset.id])}%</span>
+              </div>
+            ) : (
+              <button className="btn small" onClick={() => addToTimeline(asset)} data-testid={`add-asset-${asset.id}`}>
+                타임라인에 추가
+              </button>
+            )}
+          </div>
+        ))}
+        {project.assets.length === 0 && <p className="hint">파일을 드래그하거나 임포트 버튼을 누르세요</p>}
+      </div>
+    </div>
+  )
+}
+
+/** 자산 썸네일 (0.3.4) — 프록시 생성 완료 후 디코딩 가능해지면 자동 갱신 */
+function Thumb({ asset }: { asset: MediaAsset }): React.JSX.Element | null {
+  const [url, setUrl] = useState<string | null>(null)
+  const decodable = asset.proxyPath ?? asset.path
+  useEffect(() => {
+    let alive = true
+    void makeThumbnail(decodable, asset.kind === 'image' ? 'image' : 'video', 0).then((u) => {
+      if (alive) setUrl(u)
+    })
+    return () => {
+      alive = false
+    }
+  }, [decodable, asset.kind])
+  return url ? <img className="asset-thumb" src={url} alt="" /> : null
+}
