@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '@renderer/state/store'
 import { playback } from '@renderer/engine/playback'
 import { findClip, updateClip } from '@renderer/state/commands'
-import { computeGuideCandidates, snap1D } from '@renderer/engine/guides'
+import { computeGuideCandidates, snap1D, toCandidates } from '@renderer/engine/guides'
+import { rasterizeText } from '@renderer/engine/textRaster'
 import type { Project } from '@shared/model/types'
 
 const SNAP_PX = 8 // CSS px 기준 스냅 임계값 (Timeline.tsx 의 SNAP_PX 와 동일한 감각)
@@ -18,7 +19,9 @@ interface DragState {
   baseX: number
   baseY: number
   snapshot: Project
-  candidates: { x: number[]; y: number[] }
+  candidates: { x: number[]; y: number[]; edgeY: number[] }
+  /** 상하 안전선(edgeY) 스냅 시 중심좌표(transform.y)에서 뺄 보정량 — 텍스트 블록 높이의 절반, 텍스트가 아니면 0 */
+  edgeOffset: number
 }
 
 export function Preview(): React.JSX.Element {
@@ -48,6 +51,8 @@ export function Preview(): React.JSX.Element {
     if (!found || (found.clip.kind !== 'text' && found.clip.kind !== 'video' && found.clip.kind !== 'image')) return
     const t = found.clip.transform ?? { x: 0, y: 0, scale: 1, rotation: 0 }
     const playhead = useEditor.getState().playhead
+    // 텍스트 블록 높이의 절반만큼 안전선을 "아래쪽 끝" 기준으로 보정 — 1줄/2줄 자막 모두 같은 위치에 스냅되도록
+    const edgeOffset = found.clip.kind === 'text' && found.clip.text ? (rasterizeText(found.clip.text).height * t.scale) / 2 : 0
     dragState.current = {
       clipId: selectedClipId,
       startX: e.clientX,
@@ -55,23 +60,25 @@ export function Preview(): React.JSX.Element {
       baseX: t.x,
       baseY: t.y,
       snapshot: project,
-      candidates: computeGuideCandidates(project, playhead, height, selectedClipId)
+      candidates: computeGuideCandidates(project, playhead, height, selectedClipId),
+      edgeOffset
     }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   const cssToPx = (canvas: HTMLCanvasElement): number => width / canvas.getBoundingClientRect().width
 
-  /** 드래그 델타에 스냅을 적용한 최종 좌표 + 적중한 가이드 후보(있으면) */
+  /** 드래그 델타에 스냅을 적용한 최종 좌표 + 적중한 가이드 후보(있으면, 표시용 좌표) */
   const resolveDrag = (
     d: DragState,
     e: React.PointerEvent<HTMLCanvasElement>
   ): { nx: number; ny: number; snapX: number | null; snapY: number | null } => {
     const k = cssToPx(e.currentTarget)
     const threshold = SNAP_PX * k
-    const sx = snap1D(d.baseX + (e.clientX - d.startX) * k, d.candidates.x, threshold)
-    const sy = snap1D(d.baseY + (e.clientY - d.startY) * k, d.candidates.y, threshold)
-    return { nx: sx.value, ny: sy.value, snapX: sx.snappedTo, snapY: sy.snappedTo }
+    const yCandidates = [...toCandidates(d.candidates.y), ...d.candidates.edgeY.map((lineY) => ({ target: lineY - d.edgeOffset, display: lineY }))]
+    const sx = snap1D(d.baseX + (e.clientX - d.startX) * k, toCandidates(d.candidates.x), threshold)
+    const sy = snap1D(d.baseY + (e.clientY - d.startY) * k, yCandidates, threshold)
+    return { nx: sx.value, ny: sy.value, snapX: sx.display, snapY: sy.display }
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
