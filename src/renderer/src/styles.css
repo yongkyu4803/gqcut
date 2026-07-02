@@ -305,6 +305,25 @@ select {
   position: relative;
   flex: 1;
 }
+.track.drop-target {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: rgba(79, 124, 255, 0.08);
+}
+.track-add-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  position: sticky;
+  left: 0;
+}
+.asset-actions {
+  display: flex;
+  gap: 4px;
+}
+.asset-actions .btn {
+  flex: 1;
+}
 .clip {
   position: absolute;
   top: 4px;

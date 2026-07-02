@@ -2,10 +2,10 @@
  * e2e 테스트 훅 (1.6) — Playwright 가 다이얼로그 없이 임포트/편집/내보내기를 구동한다.
  * E2E(또는 dev) 환경에서만 주입.
  */
-import { createMediaClip, genId } from '@shared/model/factory'
+import { createMediaClip, createTrack, genId } from '@shared/model/factory'
 import type { Transition } from '@shared/model/types'
 import { useEditor, serializeProject } from './state/store'
-import { addClip, splitClip, updateClip } from './state/commands'
+import { addClip, addClipOverlay, splitClip, updateClip } from './state/commands'
 import { importFile } from './media/import'
 import { playback } from './engine/playback'
 import { captureReferenceFrame, exportTimeline, DEFAULT_EXPORT_SETTINGS } from './engine/exporter'
@@ -15,12 +15,19 @@ export function installTestHooks(): void {
     async importFile(path: string): Promise<string> {
       const asset = await importFile(path)
       const s = useEditor.getState()
-      const track = s.project.tracks.find((t) => (asset.kind === 'audio' ? t.kind === 'audio' : t.kind === 'video'))
-      if (track) {
-        const end = Math.max(0, ...track.clips.map((c) => c.timelineEnd))
-        const clip = createMediaClip(asset, end)
-        s.dispatch('타임라인에 추가(e2e)', (p) => addClip(p, track.id, clip))
+      if (asset.kind === 'image') {
+        // 이미지는 오버레이 배치 (MediaBin 과 동일 동작)
+        const clip = createMediaClip(asset, s.playhead)
+        s.dispatch('오버레이 추가(e2e)', (p) => addClipOverlay(p, clip, createTrack('video')))
         s.select(clip.id)
+      } else {
+        const track = [...s.project.tracks].reverse().find((t) => (asset.kind === 'audio' ? t.kind === 'audio' : t.kind === 'video'))
+        if (track) {
+          const end = Math.max(0, ...track.clips.map((c) => c.timelineEnd))
+          const clip = createMediaClip(asset, end)
+          s.dispatch('타임라인에 추가(e2e)', (p) => addClip(p, track.id, clip))
+          s.select(clip.id)
+        }
       }
       return asset.id
     },

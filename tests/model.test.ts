@@ -6,13 +6,18 @@ import { describe, expect, it } from 'vitest'
 import { createMediaClip, createProject, createTextClip, genId } from '@shared/model/factory'
 import type { MediaAsset, Project } from '@shared/model/types'
 import { checkInvariants } from '@shared/model/invariants'
+import { createTrack } from '@shared/model/factory'
 import {
   addAsset,
   addClip,
+  addClipOverlay,
   moveClip,
+  moveClipToTrack,
   projectDuration,
   removeClip,
+  removeTrack,
   splitClip,
+  trackAcceptsClip,
   trimClip,
   updateClip,
   findClip
@@ -120,6 +125,78 @@ describe('클립 조작 커맨드', () => {
     const asset = p.assets.find((a) => a.id === assetId)!
     const p2 = addClip(p, trackId, createMediaClip(asset, 20))
     expect(projectDuration(p2)).toBeCloseTo(30)
+  })
+})
+
+describe('멀티트랙 (오버레이)', () => {
+  function makeImageAsset(): MediaAsset {
+    return { id: genId('asset'), kind: 'image', path: '/tmp/i.png', duration: 5, width: 800, height: 600, status: 'ok' }
+  }
+
+  it('이미지 클립은 소스 시간축 없이 양방향 트림이 가능하다', () => {
+    let { p, trackId } = setup()
+    const img = makeImageAsset()
+    p = addAsset(p, img)
+    const clip = createMediaClip(img, 20)
+    expect(clip.sourceIn).toBeUndefined()
+    p = addClip(p, trackId, clip)
+    // 좌측으로 원래 시작점(20)보다 앞까지 확장
+    const left = trimClip(p, clip.id, 'start', 15)
+    expect(findClip(left, clip.id)!.clip.timelineStart).toBeCloseTo(15)
+    // 우측도 자유 확장
+    const right = trimClip(left, clip.id, 'end', 40)
+    expect(findClip(right, clip.id)!.clip.timelineEnd).toBeCloseTo(40)
+    expect(checkInvariants(right)).toHaveLength(0)
+  })
+
+  it('오버레이 배치: 메인 트랙 위에 새 비디오 트랙을 만들어 넣는다', () => {
+    let { p, assetId } = setup()
+    const asset = p.assets.find((a) => a.id === assetId)!
+    const overlayClip = createMediaClip(asset, 2)
+    p = addClipOverlay(p, overlayClip, createTrack('video'))
+    const videoTracks = p.tracks.filter((t) => t.kind === 'video')
+    expect(videoTracks).toHaveLength(2)
+    // 새 트랙이 메인 위(배열에서 앞) — 오버레이에 클립, 메인은 기존 클립 유지
+    expect(videoTracks[0].clips.map((c) => c.id)).toContain(overlayClip.id)
+    expect(videoTracks[1].clips).toHaveLength(1)
+    // 같은 자리에 또 넣으면 겹치므로 트랙이 하나 더 생긴다
+    const another = createMediaClip(asset, 3)
+    const p2 = addClipOverlay(p, another, createTrack('video'))
+    expect(p2.tracks.filter((t) => t.kind === 'video')).toHaveLength(3)
+    // 빈 구간(20초)에 넣으면 기존 오버레이 트랙을 재사용
+    const far = createMediaClip(asset, 20)
+    const p3 = addClipOverlay(p, far, createTrack('video'))
+    expect(p3.tracks.filter((t) => t.kind === 'video')).toHaveLength(2)
+    expect(checkInvariants(p3)).toHaveLength(0)
+  })
+
+  it('트랙 간 클립 이동: 같은 종류만 허용, 전환은 해제된다', () => {
+    let { p, trackId, clipId } = setup()
+    const overlay = createTrack('video')
+    p = { ...p, tracks: [overlay, ...p.tracks] }
+    p = updateClip(p, clipId, { transitionOut: undefined })
+    const moved = moveClipToTrack(p, clipId, overlay.id, 5)
+    expect(findClip(moved, clipId)!.track.id).toBe(overlay.id)
+    expect(findClip(moved, clipId)!.clip.timelineStart).toBeCloseTo(5)
+    expect(moved.tracks.find((t) => t.id === trackId)!.clips).toHaveLength(0)
+    // 오디오 트랙으로는 이동 불가
+    const audioTrack = p.tracks.find((t) => t.kind === 'audio')!
+    expect(moveClipToTrack(p, clipId, audioTrack.id, 0)).toBe(p)
+    expect(trackAcceptsClip(audioTrack, 'video')).toBe(false)
+    expect(trackAcceptsClip(overlay, 'image')).toBe(true)
+  })
+
+  it('빈 트랙만 삭제 가능, 같은 종류 마지막 트랙은 유지', () => {
+    let { p, trackId, clipId } = setup()
+    const overlay = createTrack('video')
+    p = { ...p, tracks: [overlay, ...p.tracks] }
+    expect(removeTrack(p, trackId)).toBe(p) // 클립 있는 트랙 — 불가
+    const removed = removeTrack(p, overlay.id) // 빈 오버레이 — 가능
+    expect(removed.tracks.filter((t) => t.kind === 'video')).toHaveLength(1)
+    // 마지막 남은 비디오 트랙은 비워도 삭제 불가
+    const emptied = removeClip(removed, clipId)
+    const mainId = emptied.tracks.find((t) => t.kind === 'video')!.id
+    expect(removeTrack(emptied, mainId)).toBe(emptied)
   })
 })
 

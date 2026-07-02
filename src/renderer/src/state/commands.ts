@@ -188,6 +188,70 @@ export function addTrack(p: Project, track: Track, index?: number): Project {
   return touch({ ...p, tracks })
 }
 
+/** 빈 트랙 삭제 — 같은 종류의 마지막 트랙은 유지 (UI 가정 보호) */
+export function removeTrack(p: Project, trackId: string): Project {
+  const track = p.tracks.find((t) => t.id === trackId)
+  if (!track || track.clips.length > 0) return p
+  if (p.tracks.filter((t) => t.kind === track.kind).length <= 1) return p
+  return touch({ ...p, tracks: p.tracks.filter((t) => t.id !== trackId) })
+}
+
+/** 트랙이 이 클립 종류를 받을 수 있는가 (비디오 트랙은 이미지도 수용) */
+export function trackAcceptsClip(track: Track, clipKind: Clip['kind']): boolean {
+  if (track.kind === 'video') return clipKind === 'video' || clipKind === 'image'
+  return track.kind === clipKind
+}
+
+/** 클립을 다른 트랙으로 이동 (타임라인 세로 드래그) */
+export function moveClipToTrack(p: Project, clipId: string, targetTrackId: string, newStart: number): Project {
+  const found = findClip(p, clipId)
+  const target = p.tracks.find((t) => t.id === targetTrackId)
+  if (!found || !target) return p
+  if (found.track.id === targetTrackId) return moveClip(p, clipId, newStart)
+  if (!trackAcceptsClip(target, found.clip.kind)) return p
+
+  const len = found.clip.timelineEnd - found.clip.timelineStart
+  const snapped = snapToFrame(Math.max(0, newStart), p.settings.fps)
+  const start = clampPlacement(target, null, snapped, len)
+  const moved: Clip = {
+    ...found.clip,
+    timelineStart: start,
+    timelineEnd: start + len,
+    // 전환은 원래 트랙의 인접 관계에 종속 — 이동 시 해제 (불변식 6)
+    transitionIn: undefined,
+    transitionOut: undefined
+  }
+  return touch({
+    ...p,
+    tracks: p.tracks.map((t) =>
+      t.id === found.track.id
+        ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
+        : t.id === targetTrackId
+          ? { ...t, clips: sortClips([...t.clips, moved]) }
+          : t
+    )
+  })
+}
+
+/**
+ * 오버레이 배치 (CapCut 스타일 멀티트랙): 메인(최하단) 비디오 트랙 위의 오버레이 트랙 중
+ * 해당 구간이 빈 곳을 찾아 넣고, 없으면 메인 바로 위에 새 비디오 트랙을 만들어 배치한다.
+ */
+export function addClipOverlay(p: Project, clip: Clip, newTrack: Track): Project {
+  const videoIdx = p.tracks.map((t, i) => ({ t, i })).filter((x) => x.t.kind === 'video')
+  const mainIdx = videoIdx.length > 0 ? videoIdx[videoIdx.length - 1].i : p.tracks.length
+
+  // 메인에 가까운 오버레이부터 빈 자리 탐색 (tracks[0]=최상위 레이어)
+  const overlays = videoIdx.slice(0, -1).reverse()
+  for (const { t } of overlays) {
+    const collides = t.clips.some((c) => clip.timelineStart < c.timelineEnd && clip.timelineEnd > c.timelineStart)
+    if (!collides) return addClip(p, t.id, clip)
+  }
+  // 빈 오버레이가 없으면 메인 바로 위에 새 트랙을 만들어 배치
+  const withTrack = addTrack(p, newTrack, mainIdx)
+  return addClip(withTrack, newTrack.id, clip)
+}
+
 export function updateSettings(p: Project, patch: Partial<Project['settings']>): Project {
   return touch({ ...p, settings: { ...p.settings, ...patch } })
 }

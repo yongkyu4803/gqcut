@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path'
 const ROOT = resolve(__dirname, '..')
 const FIXTURES = join(ROOT, 'e2e', '.fixtures')
 const SAMPLE = join(FIXTURES, 'sample.mp4')
+const IMAGE = join(FIXTURES, 'overlay.png')
 const OUTPUT = join(FIXTURES, 'out.mp4')
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -64,6 +65,9 @@ test.beforeAll(() => {
       '-c:a', 'aac',
       SAMPLE
     ])
+  }
+  if (!existsSync(IMAGE)) {
+    execFileSync(ffmpegPath, ['-y', '-f', 'lavfi', '-i', 'color=red:size=320x240', '-frames:v', '1', IMAGE])
   }
   rmSync(OUTPUT, { force: true })
 })
@@ -123,6 +127,21 @@ test('임포트 → 컷 → undo/redo → 텍스트/필터/전환 → 내보내�
   // 필터 (4.1) + 전환 (4.2): 채도 1.5 전체 적용, 컷 지점(2초)에 1초 디졸브
   await win.evaluate(() => window.__test!.applyFilter('saturation', 1.5))
   await win.evaluate(() => window.__test!.applyTransition('dissolve', 1.0))
+
+  // 이미지 오버레이 (멀티트랙): PNG 임포트 → 메인 위에 새 비디오 트랙 생성
+  await win.evaluate(() => window.__test!.seek(0.5))
+  await win.waitForTimeout(200)
+  await win.evaluate((path) => window.__test!.importFile(path), IMAGE)
+  let proj = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  let videoTracks = proj.tracks.filter((t: { kind: string }) => t.kind === 'video')
+  expect(videoTracks).toHaveLength(2)
+  expect(videoTracks[0].clips[0].kind).toBe('image') // 오버레이(상위 레이어) 트랙
+  expect(videoTracks[1].clips).toHaveLength(2) // 메인 트랙은 그대로
+  // 타임라인 duration 을 바꾸지 않도록 undo (오버레이 트랙+클립이 한 번에 되돌아감)
+  await win.keyboard.press('Meta+z')
+  proj = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  videoTracks = proj.tracks.filter((t: { kind: string }) => t.kind === 'video')
+  expect(videoTracks).toHaveLength(1)
 
   // 내보내기 (5.2): 컷+텍스트+필터+전환+오디오 믹스다운
   const result = await win.evaluate((path) => window.__test!.exportTo(path), OUTPUT)

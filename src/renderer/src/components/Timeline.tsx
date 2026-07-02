@@ -4,8 +4,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Clip, Track } from '@shared/model/types'
+import { createTrack } from '@shared/model/factory'
 import { useEditor } from '@renderer/state/store'
-import { moveClip, projectDuration, trimClip, updateTrack } from '@renderer/state/commands'
+import { addTrack, moveClip, moveClipToTrack, projectDuration, removeTrack, trackAcceptsClip, trimClip, updateTrack } from '@renderer/state/commands'
 import { playback } from '@renderer/engine/playback'
 import { computePeaks } from '@renderer/engine/audioEngine'
 import { formatTimecode } from '@shared/time'
@@ -18,12 +19,15 @@ type DragMode = 'move' | 'trim-start' | 'trim-end'
 interface DragState {
   mode: DragMode
   clipId: string
+  clipKind: Clip['kind']
   trackId: string
   startClientX: number
   origStart: number
   origEnd: number
   /** 드래그 미리보기 값 (초) */
   preview: { start: number; end: number }
+  /** 세로 드래그 대상 트랙 (move 모드, 같은 종류만) */
+  hoverTrackId: string | null
 }
 
 export function Timeline(): React.JSX.Element {
@@ -90,11 +94,13 @@ export function Timeline(): React.JSX.Element {
     setDrag({
       mode,
       clipId: clip.id,
+      clipKind: clip.kind,
       trackId: track.id,
       startClientX: e.clientX,
       origStart: clip.timelineStart,
       origEnd: clip.timelineEnd,
-      preview: { start: clip.timelineStart, end: clip.timelineEnd }
+      preview: { start: clip.timelineStart, end: clip.timelineEnd },
+      hoverTrackId: null
     })
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
@@ -105,7 +111,12 @@ export function Timeline(): React.JSX.Element {
     const len = drag.origEnd - drag.origStart
     if (drag.mode === 'move') {
       const start = Math.max(0, snap(drag.origStart + dt, drag.clipId))
-      setDrag({ ...drag, preview: { start, end: start + len } })
+      // 세로 드래그: 포인터 아래의 트랙 (같은 종류만 대상)
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-track-id]') as HTMLElement | null
+      const hoverId = el?.dataset.trackId ?? null
+      const hoverTrack = hoverId ? project.tracks.find((t) => t.id === hoverId) : null
+      const valid = hoverTrack && hoverTrack.id !== drag.trackId && trackAcceptsClip(hoverTrack, drag.clipKind)
+      setDrag({ ...drag, preview: { start, end: start + len }, hoverTrackId: valid ? hoverTrack.id : null })
     } else if (drag.mode === 'trim-start') {
       const start = Math.min(snap(drag.origStart + dt, drag.clipId), drag.origEnd - 0.05)
       setDrag({ ...drag, preview: { start, end: drag.origEnd } })
@@ -119,7 +130,9 @@ export function Timeline(): React.JSX.Element {
     if (!drag) return
     const d = drag
     setDrag(null)
-    if (d.mode === 'move' && Math.abs(d.preview.start - d.origStart) > 1e-6) {
+    if (d.mode === 'move' && d.hoverTrackId) {
+      dispatch('클립 트랙 이동', (p) => moveClipToTrack(p, d.clipId, d.hoverTrackId!, d.preview.start))
+    } else if (d.mode === 'move' && Math.abs(d.preview.start - d.origStart) > 1e-6) {
       dispatch('클립 이동', (p) => moveClip(p, d.clipId, d.preview.start))
     } else if (d.mode === 'trim-start' && Math.abs(d.preview.start - d.origStart) > 1e-6) {
       dispatch('클립 트림(시작)', (p) => trimClip(p, d.clipId, 'start', d.preview.start))
@@ -184,7 +197,12 @@ export function Timeline(): React.JSX.Element {
 
         {/* 트랙들 */}
         {project.tracks.map((track) => (
-          <div key={track.id} className={`track track-${track.kind}`} style={{ height: TRACK_H[track.kind] }}>
+          <div
+            key={track.id}
+            data-track-id={track.id}
+            className={`track track-${track.kind} ${drag?.hoverTrackId === track.id ? 'drop-target' : ''}`}
+            style={{ height: TRACK_H[track.kind] }}
+          >
             <div className="track-header" style={{ width: HEADER_W }}>
               <span className="track-kind">{track.kind === 'video' ? '비디오' : track.kind === 'audio' ? '오디오' : '텍스트'}</span>
               {track.kind !== 'text' && (
@@ -207,6 +225,11 @@ export function Timeline(): React.JSX.Element {
                     onChange={(e) => dispatch('트랙 볼륨', (p) => updateTrack(p, track.id, { volume: Number(e.target.value) }))}
                   />
                 </>
+              )}
+              {track.clips.length === 0 && project.tracks.filter((t) => t.kind === track.kind).length > 1 && (
+                <button className="mini-btn" title="빈 트랙 삭제" onClick={() => dispatch('트랙 삭제', (p) => removeTrack(p, track.id))}>
+                  ×
+                </button>
               )}
             </div>
             <div
@@ -241,6 +264,27 @@ export function Timeline(): React.JSX.Element {
             </div>
           </div>
         ))}
+
+        {/* 트랙 추가 (멀티트랙): 비디오는 메인 위 오버레이로, 텍스트는 최상단, 오디오는 최하단 */}
+        <div className="track-add-row">
+          <button
+            className="btn small"
+            onClick={() =>
+              dispatch('비디오 트랙 추가', (p) => {
+                const mainIdx = p.tracks.map((t, i) => (t.kind === 'video' ? i : -1)).filter((i) => i >= 0).pop() ?? p.tracks.length
+                return addTrack(p, createTrack('video'), mainIdx)
+              })
+            }
+          >
+            + 비디오
+          </button>
+          <button className="btn small" onClick={() => dispatch('텍스트 트랙 추가', (p) => addTrack(p, createTrack('text'), 0))}>
+            + 텍스트
+          </button>
+          <button className="btn small" onClick={() => dispatch('오디오 트랙 추가', (p) => addTrack(p, createTrack('audio')))}>
+            + 오디오
+          </button>
+        </div>
 
         {/* 플레이헤드 */}
         <div className="playhead" style={{ left: playheadX }} />

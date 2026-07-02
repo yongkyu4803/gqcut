@@ -46,10 +46,8 @@ export function createMediaClip(asset: MediaAsset, timelineStart: number): Clip 
     kind: asset.kind,
     timelineStart,
     timelineEnd: timelineStart + duration,
-    sourceIn: 0,
-    sourceOut: duration,
-    speed: 1,
-    volume: 1,
+    // 이미지는 소스 시간축이 없다 — sourceIn/Out 을 두면 좌측 트림이 원래 시작점에 막힌다
+    ...(asset.kind !== 'image' ? { sourceIn: 0, sourceOut: duration, speed: 1, volume: 1 } : {}),
     opacity: 1,
     transform: { x: 0, y: 0, scale: 1, rotation: 0 },
     effects: []
