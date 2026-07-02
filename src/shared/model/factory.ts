@@ -76,3 +76,31 @@ export function createTextClip(timelineStart: number, duration = 3, transform?: 
     text: { ...DEFAULT_TEXT }
   }
 }
+
+/** 자동 자막 기본 스타일 — 하단 중앙, 외곽선 + 반투명 배경(가독성) */
+export const SUBTITLE_TEXT: TextContent = {
+  value: '',
+  fontFamily: 'sans-serif',
+  fontSize: 48,
+  color: '#ffffff',
+  align: 'center',
+  bold: true,
+  stroke: { color: '#000000', width: 5 },
+  background: { color: 'rgba(0,0,0,0.5)', padding: 12 }
+}
+
+/**
+ * 자막 클립 (3.2.3) — STT 결과 배치용. 하단 중앙 기본 위치(캔버스 높이의 ~76% 지점).
+ */
+export function createSubtitleClip(timelineStart: number, timelineEnd: number, text: string, canvasHeight: number): Clip {
+  return {
+    id: genId('clip'),
+    kind: 'text',
+    timelineStart,
+    timelineEnd,
+    opacity: 1,
+    // 화면 중앙 기준 오프셋 — 하단쪽으로 (높이의 26% 아래)
+    transform: { x: 0, y: Math.round(canvasHeight * 0.26), scale: 1, rotation: 0 },
+    text: { ...SUBTITLE_TEXT, value: text }
+  }
+}

@@ -69,7 +69,7 @@ Phase 0~6 코딩 완료 — `npm run progress` 로 확인.
 - **실측**: 내보내기 파이프 ~500MB/s, 1080p30 타임라인 2.0× 실시간
 - **육안/청취 검증 대기 (`verifying`)**: 드래그/트림/스냅 감각, A/V 싱크 체감, 무끊김 재생, 믹싱/페이드 청취, 전환/애니메이션 시각 확인(서로 다른 두 클립으로), 자동저장 복구 시나리오, 4K 소스 성능 — `npm run dev` 로 확인 후 done 전환
 - **외부 요건 대기**: 6.3.2 코드사이닝/공증(Apple Developer 인증서 + `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`), 자동 업데이트 첫 게시(GitHub Releases), CI 첫 실행(저장소 push)
-- **미착수(optional)**: 3.2 자동 자막(STT) — Whisper 로컬 vs API 결정 필요
+- **자동 자막(3.2, optional) 구현 완료**: 비디오 클립 선택 → 인스펙터 "자동 자막"에서 모델/언어 선택 → Whisper(ONNX, 오프라인)로 전사해 자막 트랙 자동 배치, SRT 내보내기. 엔진은 `@huggingface/transformers` + `onnxruntime-node`(순수 npm·N-API, whisper.cpp 대안). 첫 사용 시 모델(base ~90MB) 1회 다운로드. 통합 테스트는 `RUN_STT_E2E=1 npx playwright test stt` (모델 다운로드로 CI 기본 제외)
 - ⚠ **라이선스**: 번들 FFmpeg 는 libx264 포함 GPL 빌드 — 상용 배포 전 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) 의 전환 방안(LGPL+하드웨어 인코더) 검토 필수
 
 ### 계획 개정 이력

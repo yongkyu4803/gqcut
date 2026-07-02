@@ -6,10 +6,13 @@ directories:
 files:
   - out/**
   - package.json
-# ffmpeg/ffprobe 네이티브 바이너리는 asar 밖으로 (실행 가능해야 함 — binaries.ts 의 unpacked 치환과 짝)
+# 네이티브 바이너리/모델 런타임은 asar 밖으로 (실행/로드 가능해야 함)
 asarUnpack:
   - node_modules/ffmpeg-static/**
   - node_modules/ffprobe-static/**
+  # STT(3.2): onnxruntime-node 네이티브 애드온 + Whisper WASM/토크나이저 자산
+  - node_modules/onnxruntime-node/**
+  - node_modules/@huggingface/**
 
 mac:
   category: public.app-category.video

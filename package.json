@@ -21,6 +21,7 @@
     "dist:win": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
