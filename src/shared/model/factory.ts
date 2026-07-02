@@ -1,4 +1,4 @@
-import type { Clip, MediaAsset, Project, TextContent, Track } from './types'
+import type { Clip, MediaAsset, Project, TextContent, Track, Transform } from './types'
 import { SCHEMA_VERSION } from './types'
 
 let counter = 0
@@ -65,14 +65,14 @@ export const DEFAULT_TEXT: TextContent = {
   stroke: { color: '#000000', width: 4 }
 }
 
-export function createTextClip(timelineStart: number, duration = 3): Clip {
+export function createTextClip(timelineStart: number, duration = 3, transform?: Transform): Clip {
   return {
     id: genId('clip'),
     kind: 'text',
     timelineStart,
     timelineEnd: timelineStart + duration,
     opacity: 1,
-    transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+    transform: transform ?? { x: 0, y: 0, scale: 1, rotation: 0 },
     text: { ...DEFAULT_TEXT }
   }
 }

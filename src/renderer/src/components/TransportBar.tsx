@@ -28,7 +28,9 @@ export function TransportBar(): React.JSX.Element {
   const addText = (): void => {
     const track = project.tracks.find((t) => t.kind === 'text')
     if (!track) return
-    const clip = createTextClip(playhead)
+    // 위치 일관성: 직전 자막 위치를 새 자막의 기본값으로 상속 (매번 중앙에서 시작하지 않음)
+    const last = [...track.clips].sort((a, b) => a.timelineStart - b.timelineStart).at(-1)
+    const clip = createTextClip(playhead, undefined, last?.transform)
     dispatch('텍스트 추가', (p) => addClip(p, track.id, clip))
     useEditor.getState().select(clip.id)
   }

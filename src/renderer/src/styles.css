@@ -104,6 +104,7 @@ body {
 
 /* ── 프리뷰 ────────────────────────────── */
 .preview-wrap {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -118,6 +119,20 @@ body {
   aspect-ratio: 16 / 9;
   background: #000;
   border: 1px solid var(--border);
+}
+/* 드래그 정렬 가이드선 — 편집 전용 오버레이, 내보내기 결과물엔 포함되지 않음 */
+.preview-guide-line {
+  position: absolute;
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 4px, transparent 4px 8px);
+  pointer-events: none;
+  z-index: 1;
+}
+.preview-guide-line--v {
+  width: 1px;
+}
+.preview-guide-line--h {
+  height: 1px;
+  background: repeating-linear-gradient(to right, var(--accent) 0 4px, transparent 4px 8px);
 }
 
 /* ── 인스펙터 ──────────────────────────── */
