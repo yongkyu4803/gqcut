@@ -2,7 +2,7 @@
  * 트랜스포트 — 재생/일시정지/정지, 타임코드, 분할, 텍스트 추가, 저장/열기, 내보내기
  */
 import { useState } from 'react'
-import { createTextClip, genId } from '@shared/model/factory'
+import { createProject, createTextClip, genId } from '@shared/model/factory'
 import { formatTimecode } from '@shared/time'
 import { useEditor, serializeProject, deserializeProject } from '@renderer/state/store'
 import { addClip, projectDuration, splitClip } from '@renderer/state/commands'
@@ -50,6 +50,18 @@ export function TransportBar(): React.JSX.Element {
     useEditor.getState().markSaved()
   }
 
+  /** 새 프로젝트 — 미저장 변경이 있으면 확인 후 빈 프로젝트로 초기화 */
+  const newProject = (): void => {
+    const s = useEditor.getState()
+    const dirty = s.past.length !== s.savedRevision
+    if (dirty && !confirm('저장되지 않은 변경이 있습니다.\n버리고 새 프로젝트를 시작할까요?')) return
+    playback.pause()
+    s.replaceProject(createProject())
+    s.setProjectPath(null)
+    void window.editor.clearAutosave()
+    playback.refresh()
+  }
+
   const open = async (): Promise<void> => {
     const result = await window.editor.openProjectDialog()
     if (!result) return
@@ -79,6 +91,9 @@ export function TransportBar(): React.JSX.Element {
 
   return (
     <div className="transport">
+      <button className="btn" data-testid="new-project-btn" onClick={newProject} title="새 프로젝트">
+        ＋ 새로 만들기
+      </button>
       <button className="btn" onClick={() => void open()}>
         열기
       </button>

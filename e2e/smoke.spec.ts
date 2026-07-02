@@ -78,6 +78,7 @@ test('임포트 → 컷 → undo/redo → 텍스트/필터/전환 → 내보내�
     env: { ...process.env, E2E: '1' }
   })
   const win = await app.firstWindow()
+  win.on('dialog', (d) => void d.accept()) // confirm/alert 자동 수락 (새 프로젝트 확인 등)
   await win.waitForSelector('[data-testid="import-btn"]')
 
   // 0.1 검증: IPC ping/pong
@@ -173,6 +174,12 @@ test('임포트 → 컷 → undo/redo → 텍스트/필터/전환 → 내보내�
     console.log(`[wysiwyg] frame ${fi} (t=${t.toFixed(3)}s) SSIM=${ssim}`)
     expect(ssim, `frame ${fi} SSIM=${ssim}`).toBeGreaterThanOrEqual(0.99)
   }
+
+  // 새 프로젝트: 미저장 변경 확인(자동 수락) 후 빈 프로젝트로 초기화
+  await win.click('[data-testid="new-project-btn"]')
+  const fresh = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  expect(fresh.assets).toHaveLength(0)
+  expect(fresh.tracks.every((t: { clips: unknown[] }) => t.clips.length === 0)).toBe(true)
 
   await app.close()
 })
