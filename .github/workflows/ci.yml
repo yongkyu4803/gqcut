@@ -15,14 +15,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # npm ci 의 electron postinstall 이 CI 에서 바이너리를 남기지 않는 문제 → 강제 재설치 (+DEBUG 진단)
+      # 러너의 Node 24 에서 electron install.js 가 dist 압축해제까지만 하고 path.txt 를 쓰기 전에
+      # 조용히 종료하는 버그(extract-zip 프로미스 미해결) → path.txt 를 직접 보정 후 실행 검증
       - name: Electron 바이너리 보장
         run: |
-          echo "SKIP_BINARY=[$ELECTRON_SKIP_BINARY_DOWNLOAD]"
-          rm -rf node_modules/electron/dist node_modules/electron/path.txt
-          DEBUG='@electron/get:*' node node_modules/electron/install.js
-          echo "install.js exit: $?"
-          ls node_modules/electron/dist/ 2>/dev/null | head -3 || echo "(dist 없음)"
+          node node_modules/electron/install.js
+          node -e "const fs=require('fs'),p='node_modules/electron/path.txt';if(!fs.existsSync(p))fs.writeFileSync(p,'Electron.app/Contents/MacOS/Electron')"
           npx electron --version
       - run: npm run plan:validate
       - run: npm run typecheck
