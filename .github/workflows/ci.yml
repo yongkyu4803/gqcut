@@ -15,12 +15,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # 러너의 Node 24 에서 electron install.js 가 dist 압축해제까지만 하고 path.txt 를 쓰기 전에
-      # 조용히 종료하는 버그(extract-zip 프로미스 미해결) → path.txt 를 직접 보정 후 실행 검증
+      # 러너(Node 24)에서 electron 의 extract-zip 이 압축해제를 끝내지 못한 채 조용히 종료해
+      # 불완전한 dist 가 남는다 → 설치 스크립트를 우회하고 zip 을 ditto 로 직접 해제 (macOS 러너 전용)
       - name: Electron 바이너리 보장
         run: |
-          node node_modules/electron/install.js
-          node -e "const fs=require('fs'),p='node_modules/electron/path.txt';if(!fs.existsSync(p))fs.writeFileSync(p,'Electron.app/Contents/MacOS/Electron')"
+          VER=$(node -p "require('./node_modules/electron/package.json').version")
+          ARCH=$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo x64)
+          ZIP=$(find "$HOME/Library/Caches/electron" -name "electron-v${VER}-darwin-${ARCH}.zip" 2>/dev/null | head -1)
+          if [ -z "$ZIP" ]; then
+            ZIP=/tmp/electron.zip
+            curl -fsSL -o "$ZIP" "https://github.com/electron/electron/releases/download/v${VER}/electron-v${VER}-darwin-${ARCH}.zip"
+          fi
+          echo "using $ZIP"
+          rm -rf node_modules/electron/dist node_modules/electron/path.txt
+          mkdir -p node_modules/electron/dist
+          ditto -xk "$ZIP" node_modules/electron/dist
+          printf "Electron.app/Contents/MacOS/Electron" > node_modules/electron/path.txt
           npx electron --version
       - run: npm run plan:validate
       - run: npm run typecheck
