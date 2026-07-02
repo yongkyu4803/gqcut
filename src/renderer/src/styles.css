@@ -373,17 +373,23 @@ select {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 7px;
+  width: 12px;
   cursor: col-resize;
   z-index: 2;
 }
 .trim-handle.left {
   left: 0;
-  border-left: 3px solid rgba(255, 255, 255, 0.35);
+  border-left: 4px solid rgba(255, 255, 255, 0.35);
 }
 .trim-handle.right {
   right: 0;
-  border-right: 3px solid rgba(255, 255, 255, 0.35);
+  border-right: 4px solid rgba(255, 255, 255, 0.35);
+}
+.clip.selected .trim-handle.left {
+  border-left-color: var(--accent-2);
+}
+.clip.selected .trim-handle.right {
+  border-right-color: var(--accent-2);
 }
 .playhead {
   position: absolute;

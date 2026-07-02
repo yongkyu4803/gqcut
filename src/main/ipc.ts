@@ -18,7 +18,7 @@ export function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(win!, {
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: '미디어', extensions: ['mp4', 'mov', 'mkv', 'webm', 'mp3', 'wav', 'aac', 'm4a', 'png', 'jpg', 'jpeg'] }
+        { name: '미디어', extensions: ['mp4', 'mov', 'mkv', 'webm', 'gif', 'mp3', 'wav', 'aac', 'm4a', 'png', 'jpg', 'jpeg', 'webp', 'bmp'] }
       ]
     })
     return result.canceled ? [] : result.filePaths

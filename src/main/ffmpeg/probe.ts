@@ -59,23 +59,30 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
   if (!video && !audio) throw new Error('비디오/오디오 스트림이 없는 파일입니다')
 
   const durationSec = Number(parsed.format?.duration ?? video?.duration ?? audio?.duration ?? 0)
-  if (!Number.isFinite(durationSec) || durationSec <= 0) {
-    // 이미지(png/jpg 등)는 duration 이 없다 — 이미지로 취급
-    const isImage = video && !audio && (Number(video.nb_frames ?? '1') <= 1 || !parsed.format?.duration)
-    if (video && isImage) {
-      return {
-        path: filePath,
-        kind: 'image',
-        durationSec: 0,
-        width: video.width,
-        height: video.height,
-        fps: undefined,
-        vfr: false,
-        videoCodec: video.codec_name,
-        hasAudio: false,
-        likelyWebCodecsSupported: false
-      }
+
+  // 정지 이미지 판별 — duration 유무가 아니라 포맷/코덱 기반 (일부 이미지는 1프레임 duration 을 보고해
+  // '0.04초짜리 비디오'로 오분류되면 타임라인에서 늘릴 수 없는 클립이 된다)
+  const fmtName = parsed.format?.format_name ?? ''
+  const stillFormat = /image2|_pipe/.test(fmtName)
+  const IMAGE_CODECS = new Set(['png', 'mjpeg', 'bmp', 'webp', 'tiff', 'gif'])
+  const codecLower = video?.codec_name?.toLowerCase() ?? ''
+  const stillCodec = IMAGE_CODECS.has(codecLower) && !(durationSec > 0.5) // 0.5초 초과면 애니메이션(GIF 등)으로 간주
+  if (video && !audio && (stillFormat || stillCodec)) {
+    return {
+      path: filePath,
+      kind: 'image',
+      durationSec: 0,
+      width: video.width,
+      height: video.height,
+      fps: undefined,
+      vfr: false,
+      videoCodec: video.codec_name,
+      hasAudio: false,
+      likelyWebCodecsSupported: false
     }
+  }
+
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
     throw new Error('유효한 duration 을 읽을 수 없습니다')
   }
 
