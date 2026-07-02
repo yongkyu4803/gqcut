@@ -1,7 +1,9 @@
 /**
- * 인스펙터 — 선택 클립 속성 편집: 볼륨/페이드(2.2), 변형/불투명도, 텍스트 스타일·애니메이션(3.1)
+ * 인스펙터 — 선택 클립 속성 편집: 볼륨/페이드(2.2), 변형/불투명도, 텍스트 스타일·애니메이션(3.1),
+ * 색보정 필터(4.1), 클립 간 전환(4.2)
  */
-import type { Clip, TextAnimation, TextContent } from '@shared/model/types'
+import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
+import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { useEditor } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 
@@ -72,6 +74,9 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {(clip.kind === 'video' || clip.kind === 'image') && <FilterPanel clip={clip} onSet={set} />}
+      {clip.kind !== 'text' && clip.kind !== 'audio' && <TransitionPanel clip={clip} track={found.track} onSet={set} />}
+
       {(clip.kind === 'video' || clip.kind === 'audio') && (
         <>
           <h4>오디오</h4>
@@ -89,6 +94,103 @@ export function Inspector(): React.JSX.Element {
 
       {clip.kind === 'text' && clip.text && <TextPanel clip={clip} text={clip.text} onSet={set} />}
     </div>
+  )
+}
+
+/** 색보정 필터 (4.1.3) — effects-spec 규격 기반 슬라이더, 실시간 프리뷰 반영 */
+function FilterPanel({ clip, onSet }: { clip: Clip; onSet: (label: string, patch: Partial<Clip>) => void }): React.JSX.Element {
+  const effects = clip.effects ?? []
+  const valueOf = (type: string, def: number): number => {
+    const e = effects.find((x) => x.type === type)
+    return e && e.enabled ? (e.params.value ?? def) : def
+  }
+  const setValue = (type: string, label: string, value: number): void => {
+    const next: Effect[] = effects.some((e) => e.type === type)
+      ? effects.map((e) => (e.type === type ? { ...e, enabled: true, params: { ...e.params, value } } : e))
+      : [...effects, { type, params: { value }, enabled: true }]
+    onSet(`필터: ${label}`, { effects: next })
+  }
+  const hasAny = effects.some((e) => e.enabled)
+  return (
+    <>
+      <h4>
+        필터{' '}
+        {hasAny && (
+          <button className="mini-btn" title="필터 초기화" onClick={() => onSet('필터 초기화', { effects: [] })}>
+            ↺
+          </button>
+        )}
+      </h4>
+      {FILTER_SPECS.map((spec) => {
+        const p = spec.params[0]
+        return (
+          <Row key={spec.type} label={spec.label}>
+            <input
+              type="range"
+              min={p.min}
+              max={p.max}
+              step={p.step}
+              value={valueOf(spec.type, p.default)}
+              onChange={(e) => setValue(spec.type, spec.label, Number(e.target.value))}
+            />
+          </Row>
+        )
+      })}
+    </>
+  )
+}
+
+/** 클립 간 전환 (4.2.3) — 다음 클립과 맞닿아 있을 때만. duration 은 두 클립 길이로 클램프 (불변식 4/7) */
+function TransitionPanel({ clip, track, onSet }: { clip: Clip; track: Track; onSet: (label: string, patch: Partial<Clip>) => void }): React.JSX.Element | null {
+  const sorted = [...track.clips].sort((a, b) => a.timelineStart - b.timelineStart)
+  const idx = sorted.findIndex((c) => c.id === clip.id)
+  const next = idx >= 0 ? sorted[idx + 1] : undefined
+  const adjacent = next && Math.abs(next.timelineStart - clip.timelineEnd) < 1e-3
+  if (!adjacent) return null
+
+  const maxDur = Math.min(clip.timelineEnd - clip.timelineStart, next.timelineEnd - next.timelineStart)
+  const t = clip.transitionOut
+
+  const setTransition = (patch: Partial<Transition> | null): void => {
+    if (patch === null) {
+      onSet('전환 제거', { transitionOut: undefined })
+    } else {
+      const merged: Transition = { type: t?.type ?? 'dissolve', duration: t?.duration ?? Math.min(1, maxDur), ...patch }
+      merged.duration = Math.min(Math.max(0.1, merged.duration), maxDur)
+      onSet('전환 설정', { transitionOut: merged })
+    }
+  }
+
+  return (
+    <>
+      <h4>다음 클립으로 전환</h4>
+      <Row label="유형">
+        <select
+          data-testid="transition-type"
+          value={t?.type ?? 'none'}
+          onChange={(e) => (e.target.value === 'none' ? setTransition(null) : setTransition({ type: e.target.value }))}
+        >
+          <option value="none">없음</option>
+          {TRANSITION_TYPES.map((tt) => (
+            <option key={tt.type} value={tt.type}>
+              {tt.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      {t && (
+        <Row label="길이(초)">
+          <input
+            type="number"
+            min={0.1}
+            max={maxDur}
+            step={0.1}
+            value={t.duration}
+            onChange={(e) => setTransition({ duration: Number(e.target.value) })}
+          />
+        </Row>
+      )}
+    </>
   )
 }
 

@@ -112,7 +112,10 @@ src/
 - 재생/시크와 오디오 스케줄을 `currentTime` 기준으로 정렬
 - 게인 단계: 클립 GainNode → 트랙 GainNode → 마스터 GainNode (DATA-MODEL 의 `volume`/`masterVolume` 과 1:1 대응)
 - 비디오 클립의 소리 재생(최소 단일 경로)은 A/V 싱크 검증을 위해 **dev-plan 1.4** 에 포함, 믹싱/페이드는 Phase 2 에서 확장
-- **내보내기 믹스다운 경로는 미정**: OfflineAudioContext vs FFmpeg 오디오 필터 — dev-plan **5.1** 에서 결정 후 TECH-STACK.md 에 기록
+- **내보내기 믹스다운 — 확정 (5.1, 2026-07-02): OfflineAudioContext.**
+  프리뷰와 동일한 그래프 스케줄 함수(`scheduleProjectAudio`)를 오프라인 컨텍스트에 그대로 실행해
+  f32le PCM 으로 렌더 → IPC 스트리밍 → FFmpeg 에서 AAC 인코딩·mux.
+  근거: 볼륨/페이드 수식을 FFmpeg 필터로 복제하지 않으므로 **오디오 WYSIWYG 가 구조적으로 보장**된다.
 
 ## 6. 내보내기 엔진
 

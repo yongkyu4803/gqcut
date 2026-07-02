@@ -4,7 +4,7 @@ import { Preview } from './components/Preview'
 import { Inspector } from './components/Inspector'
 import { TransportBar } from './components/TransportBar'
 import { Timeline } from './components/Timeline'
-import { useEditor } from './state/store'
+import { useEditor, serializeProject, deserializeProject } from './state/store'
 import { findClip, removeClip, addClip, splitClip } from './state/commands'
 import { genId } from '@shared/model/factory'
 import type { Clip } from '@shared/model/types'
@@ -67,7 +67,42 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    installTestHooks()
+    if (window.editor.isE2E || import.meta.env.DEV) installTestHooks()
+  }, [])
+
+  // 자동저장 (6.1.2): 30초마다 미저장 변경이 있으면 자동저장. 시작 시 복구 제안.
+  useEffect(() => {
+    let lastAutosavedRevision = -1
+    const interval = setInterval(() => {
+      const s = useEditor.getState()
+      if (s.exportProgress?.active) return
+      const revision = s.past.length
+      if (revision !== s.savedRevision && revision !== lastAutosavedRevision) {
+        lastAutosavedRevision = revision
+        void window.editor.autosave(serializeProject(s.project), s.projectPath)
+      }
+    }, 30_000)
+
+    // 크래시 복구 (E2E 에선 비활성 — 다이얼로그가 테스트를 막음)
+    if (!window.editor.isE2E) {
+      void window.editor.checkAutosave().then((auto) => {
+        if (!auto) return
+        const restore = confirm(`저장되지 않은 작업이 있습니다 (${new Date(auto.savedAt).toLocaleString()}).\n복구할까요?`)
+        if (restore) {
+          try {
+            useEditor.getState().replaceProject(deserializeProject(auto.json))
+            useEditor.getState().setProjectPath(auto.originalPath)
+            playback.preloadAudio(useEditor.getState().project)
+            playback.refresh()
+          } catch (e) {
+            alert(`복구 실패: ${e instanceof Error ? e.message : e}`)
+          }
+        } else {
+          void window.editor.clearAutosave()
+        }
+      })
+    }
+    return () => clearInterval(interval)
   }, [])
 
   return (

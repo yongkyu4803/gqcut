@@ -210,6 +210,10 @@ select {
   padding: 3px 8px;
   font-size: 11px;
 }
+.btn.missing {
+  border-color: #b3552e;
+  color: #ffb08a;
+}
 .mini-btn {
   background: var(--panel-2);
   color: var(--text-dim);

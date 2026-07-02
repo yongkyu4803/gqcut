@@ -6,7 +6,7 @@ import type { MediaAsset } from '@shared/model/types'
 import { createMediaClip } from '@shared/model/factory'
 import { useEditor } from '@renderer/state/store'
 import { addClip, projectDuration } from '@renderer/state/commands'
-import { importFile, importViaDialog } from '@renderer/media/import'
+import { importFile, importViaDialog, relinkAsset } from '@renderer/media/import'
 import { makeThumbnail } from '@renderer/engine/thumbnail'
 
 export function MediaBin(): React.JSX.Element {
@@ -58,10 +58,14 @@ export function MediaBin(): React.JSX.Element {
               {asset.vfr ? ' · VFR' : ''}
               {asset.proxyPath ? ' · 프록시' : ''}
             </div>
-            {proxyJobs[asset.id] !== undefined ? (
+            {asset.status === 'missing' ? (
+              <button className="btn small missing" onClick={() => void relinkAsset(asset.id)}>
+                ⚠ 파일 누락 — 재연결
+              </button>
+            ) : proxyJobs[asset.id] !== undefined ? (
               <div className="proxy-progress">
                 <div className="bar" style={{ width: `${proxyJobs[asset.id]}%` }} />
-                <span>호환 프록시 생성 중 {Math.round(proxyJobs[asset.id])}%</span>
+                <span>프록시 생성 중 {Math.round(proxyJobs[asset.id])}%</span>
               </div>
             ) : (
               <button className="btn small" onClick={() => addToTimeline(asset)} data-testid={`add-asset-${asset.id}`}>

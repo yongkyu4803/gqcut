@@ -1,130 +1,171 @@
 /**
- * 내보내기 파이프 — 메인 프로세스 측 (1.5 스파이크)
- * 렌더러가 프레임(RGBA)을 IPC 로 보내면 FFmpeg stdin 으로 파이프해 인코딩한다.
- * - 백프레셔: stdin.write() 가 false 면 drain 까지 대기 → IPC invoke 응답 지연으로 렌더러가 자연히 감속
- * - 오디오: wav 세그먼트 atrim + concat 패스스루 (1.5.4 — 믹스다운은 Phase 5)
- * - 처리량 측정 (1.5.3): 프레임 수/바이트/MB/s 를 결과로 반환
+ * 내보내기 파이프 — 메인 프로세스 측 (1.5 스파이크 → 5.2 완성)
+ *
+ * 흐름:
+ *  1) startExport: 잡 생성. audio='mixdown' 이면 임시 f32 파일 스트림 준비, ffmpeg 스폰은 오디오 완료까지 지연
+ *  2) writeAudioChunk / audioDone: 렌더러가 OfflineAudioContext 믹스다운(f32le 스테레오)을 스트리밍
+ *  3) writeFrame: 렌더러의 RGBA 프레임을 stdin 파이프 (백프레셔: drain 대기 → IPC 응답 지연으로 자연 감속)
+ *  4) finishExport: stdin 종료 → 인코딩 완료 대기 → 처리량 통계 반환
+ *
+ * 색공간 (ARCHITECTURE §6.3): RGB→YUV 매트릭스 BT.709 고정 + 스트림 태깅.
  */
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
+import { createWriteStream, type WriteStream } from 'node:fs'
 import { unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ffmpegPath } from './ffmpeg/binaries'
 import type { ExportResult, ExportStartOptions } from '../shared/ipc-types'
 
 interface ExportJob {
-  child: ChildProcessByStdio<Writable, null, Readable>
   opts: ExportStartOptions
+  child: ChildProcessByStdio<Writable, null, Readable> | null
+  /** ffmpeg 스폰 완료를 기다리는 배리어 (오디오 믹스다운 수신 후 스폰) */
+  ready: Promise<void>
+  markReady: () => void
+  audioFile: string | null
+  audioStream: WriteStream | null
   startedAt: number
   frames: number
   bytes: number
   stderrTail: string
-  closed: Promise<number | null>
+  closed: Promise<number | null> | null
   cancelled: boolean
 }
 
 const jobs = new Map<string, ExportJob>()
 let jobCounter = 0
 
-export function startExport(opts: ExportStartOptions): { jobId: string } {
-  const jobId = `export_${++jobCounter}`
-
+function buildArgs(opts: ExportStartOptions, audioFile: string | null): string[] {
   const args: string[] = [
     '-y',
-    // 비디오: 렌더러가 파이프로 보내는 raw RGBA 프레임
     '-f', 'rawvideo', '-pix_fmt', 'rgba',
     '-s', `${opts.width}x${opts.height}`,
     '-r', String(opts.fps),
     '-i', 'pipe:0'
   ]
+  if (audioFile) args.push('-f', 'f32le', '-ar', String(opts.sampleRate), '-ac', '2', '-i', audioFile)
 
-  // 오디오 세그먼트 입력 + concat 필터그래프 (wav 구간 or 무음)
-  const segs = opts.audioSegments
-  const fmt = `aformat=sample_fmts=fltp:sample_rates=${opts.sampleRate}:channel_layouts=stereo`
-  const wavSegs = segs.filter((s) => s.wavPath)
-  for (const seg of wavSegs) args.push('-i', seg.wavPath!)
-  const filters: string[] = []
-  if (segs.length > 0) {
-    let wavInput = 0
-    segs.forEach((seg, i) => {
-      if (seg.wavPath) {
-        wavInput += 1
-        filters.push(`[${wavInput}:a]atrim=start=${seg.sourceIn}:end=${seg.sourceOut},asetpts=PTS-STARTPTS,${fmt}[a${i}]`)
-      } else {
-        filters.push(`aevalsrc=0|0:s=${opts.sampleRate}:d=${Math.max(0.001, seg.silenceSec ?? 0)},${fmt}[a${i}]`)
-      }
-    })
-    filters.push(`${segs.map((_, i) => `[a${i}]`).join('')}concat=n=${segs.length}:v=0:a=1[aout]`)
-    args.push('-filter_complex', filters.join(';'))
-  }
-
-  // 색공간 규칙 (1.3.4 / WYSIWYG): RGB→YUV 매트릭스를 BT.709 로 고정하고 스트림에 태깅.
-  // 미지정 시 swscale 기본값(해상도 의존)과 플레이어 추정이 어긋나 G 채널이 틀어진다.
-  const vf = [...(opts.vflip ? ['vflip'] : []), 'scale=out_color_matrix=bt709:out_range=tv'].join(',')
+  // vflip + (선택) 프리셋 스케일 + BT.709 매트릭스 고정
+  const scalePart = opts.scaleWidth && opts.scaleHeight ? `${opts.scaleWidth}:${opts.scaleHeight}:flags=bicubic:` : ''
+  const vf = [...(opts.vflip ? ['vflip'] : []), `scale=${scalePart}out_color_matrix=bt709:out_range=tv`].join(',')
   args.push('-vf', vf, '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709')
+
   args.push('-map', '0:v')
-  if (segs.length > 0) args.push('-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-ar', String(opts.sampleRate))
+  if (audioFile) args.push('-map', '1:a', '-c:a', 'aac', '-b:a', '192k')
 
   args.push(
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+    '-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.crf),
     '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart',
+    '-shortest',
     opts.outputPath
   )
+  return args
+}
 
-  const child = spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'] })
-  const job: ExportJob = {
-    child,
-    opts,
-    startedAt: Date.now(),
-    frames: 0,
-    bytes: 0,
-    stderrTail: '',
-    cancelled: false,
-    closed: new Promise((resolvePromise) => child.on('close', (code) => resolvePromise(code)))
-  }
+function spawnFfmpeg(job: ExportJob): void {
+  const child = spawn(ffmpegPath(), buildArgs(job.opts, job.audioFile), { stdio: ['pipe', 'ignore', 'pipe'] })
   child.stderr.on('data', (d: Buffer) => {
     job.stderrTail = (job.stderrTail + d.toString()).slice(-4000)
   })
   child.on('error', () => {
     /* close 에서 처리 */
   })
+  job.child = child
+  job.closed = new Promise((resolvePromise) => child.on('close', (code) => resolvePromise(code)))
+  job.markReady()
+}
+
+export function startExport(opts: ExportStartOptions): { jobId: string } {
+  const jobId = `export_${++jobCounter}`
+  let markReady!: () => void
+  const ready = new Promise<void>((resolvePromise) => {
+    markReady = resolvePromise
+  })
+  const job: ExportJob = {
+    opts,
+    child: null,
+    ready,
+    markReady,
+    audioFile: null,
+    audioStream: null,
+    startedAt: Date.now(),
+    frames: 0,
+    bytes: 0,
+    stderrTail: '',
+    closed: null,
+    cancelled: false
+  }
   jobs.set(jobId, job)
+
+  if (opts.audio === 'mixdown') {
+    job.audioFile = join(tmpdir(), `gqcut_${jobId}.f32`)
+    job.audioStream = createWriteStream(job.audioFile)
+  } else {
+    spawnFfmpeg(job)
+  }
   return { jobId }
 }
 
-export async function writeFrame(jobId: string, frame: ArrayBuffer): Promise<void> {
+function getJob(jobId: string): ExportJob {
   const job = jobs.get(jobId)
   if (!job || job.cancelled) throw new Error(`알 수 없는 내보내기 잡: ${jobId}`)
+  return job
+}
+
+async function writeWithDrain(stream: Writable, buf: Buffer): Promise<void> {
+  if (stream.write(buf)) return
+  await new Promise<void>((resolvePromise, reject) => {
+    const onDrain = (): void => {
+      cleanup()
+      resolvePromise()
+    }
+    const onErr = (e: Error): void => {
+      cleanup()
+      reject(e)
+    }
+    const cleanup = (): void => {
+      stream.off('drain', onDrain)
+      stream.off('error', onErr)
+    }
+    stream.once('drain', onDrain)
+    stream.once('error', onErr)
+  })
+}
+
+export async function writeAudioChunk(jobId: string, chunk: ArrayBuffer): Promise<void> {
+  const job = getJob(jobId)
+  if (!job.audioStream) throw new Error('오디오 스트림이 없는 잡입니다')
+  await writeWithDrain(job.audioStream, Buffer.from(chunk))
+}
+
+export async function audioDone(jobId: string): Promise<void> {
+  const job = getJob(jobId)
+  if (!job.audioStream) throw new Error('오디오 스트림이 없는 잡입니다')
+  await new Promise<void>((resolvePromise) => job.audioStream!.end(resolvePromise))
+  spawnFfmpeg(job)
+}
+
+export async function writeFrame(jobId: string, frame: ArrayBuffer): Promise<void> {
+  const job = getJob(jobId)
+  await job.ready
+  if (job.cancelled || !job.child) throw new Error('취소된 잡입니다')
   const buf = Buffer.from(frame)
   job.frames += 1
   job.bytes += buf.length
-  const ok = job.child.stdin.write(buf)
-  if (!ok) {
-    await new Promise<void>((resolvePromise, reject) => {
-      const onDrain = () => {
-        cleanup()
-        resolvePromise()
-      }
-      const onErr = (e: Error) => {
-        cleanup()
-        reject(e)
-      }
-      const cleanup = () => {
-        job.child.stdin.off('drain', onDrain)
-        job.child.stdin.off('error', onErr)
-      }
-      job.child.stdin.once('drain', onDrain)
-      job.child.stdin.once('error', onErr)
-    })
-  }
+  await writeWithDrain(job.child.stdin, buf)
 }
 
 export async function finishExport(jobId: string): Promise<ExportResult> {
   const job = jobs.get(jobId)
   if (!job) return { ok: false, error: `알 수 없는 잡: ${jobId}` }
-  job.child.stdin.end()
-  const code = await job.closed
+  await job.ready
+  job.child?.stdin.end()
+  const code = job.closed ? await job.closed : null
   jobs.delete(jobId)
+  if (job.audioFile) await unlink(job.audioFile).catch(() => {})
   const elapsedMs = Date.now() - job.startedAt
   if (job.cancelled) return { ok: false, error: 'cancelled' }
   if (code !== 0) {
@@ -145,9 +186,12 @@ export async function cancelExport(jobId: string): Promise<void> {
   const job = jobs.get(jobId)
   if (!job) return
   job.cancelled = true
-  job.child.kill('SIGKILL')
-  await job.closed
+  job.markReady() // ready 대기 중인 writeFrame 해제
+  job.audioStream?.destroy()
+  job.child?.kill('SIGKILL')
+  if (job.closed) await job.closed
   jobs.delete(jobId)
-  // 임시파일 정리 (5.2.3 취소 시 출력물 삭제)
+  // 임시파일 정리 (5.2.3): 출력물 + 오디오 믹스다운
   await unlink(job.opts.outputPath).catch(() => {})
+  if (job.audioFile) await unlink(job.audioFile).catch(() => {})
 }

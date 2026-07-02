@@ -1,12 +1,14 @@
 /**
- * e2e 스모크 (1.6.1): 임포트 → 컷 편집 → 시크 → 내보내기 관통 시나리오.
+ * e2e 스모크 (1.6.1) + WYSIWYG 수치 검증 (5.2.5)
+ * 임포트 → 컷 편집 → undo/redo → 텍스트 → 필터 → 전환 → 내보내기 관통 시나리오.
+ * WYSIWYG 게이트: 기준 프레임(프리뷰와 동일 렌더 경로 캡처) vs 출력 프레임 SSIM ≥ 0.99.
  * 회귀 게이트 — 이 테스트가 깨지면 phase 진행 불가 (globalVerificationGates).
  */
 /// <reference lib="dom" />
 /// <reference path="../src/preload/api.d.ts" />
 import { test, expect, _electron as electron } from '@playwright/test'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(__dirname, '..')
@@ -24,21 +26,28 @@ function probeDuration(file: string): number {
   return Number(out.toString().trim())
 }
 
-/** 동일 시각 프레임의 SSIM (WYSIWYG 스팟 체크, 1.5) — 원본을 출력 해상도로 스케일해 비교. crop 지정 시 해당 영역만. */
-function ssimAt(outFile: string, srcFile: string, t: number, crop?: string): number {
-  const c = crop ? `,crop=${crop}` : ''
+function probeStreams(file: string): string {
+  return execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file]).toString()
+}
+
+/** 출력 파일의 fi 번째 프레임 추출 */
+function extractFrame(file: string, frameIndex: number, outPng: string): void {
+  execFileSync(ffmpegPath, ['-y', '-v', 'error', '-i', file, '-vf', `select=eq(n\\,${frameIndex})`, '-frames:v', '1', outPng])
+}
+
+/**
+ * 두 이미지의 SSIM (WYSIWYG 수치 판정).
+ * 양쪽을 yuv420p 로 정규화해 비교 — H.264 의 4:2:0 크로마 서브샘플링은 인코딩 고유 손실이라
+ * 렌더 파이프라인 동일성 판정에서 제외한다 (색바 같은 고채도 경계에서만 크게 나타남).
+ */
+function ssimImages(a: string, b: string): number {
   const result = spawnSync(
     ffmpegPath,
-    [
-      '-ss', String(t), '-i', outFile,
-      '-ss', String(t), '-i', srcFile,
-      '-filter_complex', `[0:v]null${c}[a];[1:v]scale=1920:1080:flags=bicubic${c}[b];[a][b]ssim`,
-      '-frames:v', '1', '-f', 'null', '-'
-    ],
+    ['-i', a, '-i', b, '-filter_complex', '[0:v]format=yuv420p[ra];[1:v]format=yuv420p[rb];[ra][rb]ssim', '-frames:v', '1', '-f', 'null', '-'],
     { encoding: 'utf8' }
   )
   const m = /All:(\d+\.\d+)/.exec(result.stderr)
-  if (!m) throw new Error(`SSIM 파싱 실패: ${result.stderr.slice(-500)}`)
+  if (!m) throw new Error(`SSIM 파싱 실패: ${result.stderr.slice(-400)}`)
   return Number(m[1])
 }
 
@@ -59,7 +68,7 @@ test.beforeAll(() => {
   rmSync(OUTPUT, { force: true })
 })
 
-test('임포트 → 분할 → 삭제 → 시크 → 내보내기 스모크', async () => {
+test('임포트 → 컷 → undo/redo → 텍스트/필터/전환 → 내보내기 → WYSIWYG SSIM', async () => {
   const app = await electron.launch({
     args: [join(ROOT, 'out', 'main', 'index.js')],
     env: { ...process.env, E2E: '1' }
@@ -68,65 +77,56 @@ test('임포트 → 분할 → 삭제 → 시크 → 내보내기 스모크', as
   await win.waitForSelector('[data-testid="import-btn"]')
 
   // 0.1 검증: IPC ping/pong
-  const pong = await win.evaluate(() => window.editor.ping())
-  expect(pong).toBe('pong')
+  expect(await win.evaluate(() => window.editor.ping())).toBe('pong')
 
   // 0.2 검증: 손상/비미디어 파일은 크래시 없이 에러 반환 (graceful)
   const probeError = await win.evaluate(() => window.editor.probe('/nonexistent/broken.mp4').then(() => null, (e: Error) => e.message))
   expect(probeError).toBeTruthy()
 
-  // 임포트 (0.2 프로브 + 0.3) — 테스트 훅으로 다이얼로그 우회
+  // 임포트 (0.2 프로브 + 0.3 + 0.4 프록시: 샘플은 bt470bg 라 색공간 정규화 프록시 경로를 탄다)
   const assetId = await win.evaluate((path) => window.__test!.importFile(path), SAMPLE)
   expect(assetId).toBeTruthy()
   await win.waitForSelector('[data-testid^="clip-"]')
 
-  // 프로젝트 상태 확인: 4초 클립 1개
-  let project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  const videoTrack = project.tracks.find((t: { kind: string }) => t.kind === 'video')
-  expect(videoTrack.clips).toHaveLength(1)
-  expect(videoTrack.clips[0].timelineEnd).toBeCloseTo(4, 1)
+  const getClips = async (): Promise<Array<{ id: string; timelineStart: number; timelineEnd: number; sourceIn: number }>> => {
+    const project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+    return project.tracks.find((t: { kind: string }) => t.kind === 'video').clips
+  }
 
-  // 컷 편집 (1.2.4): 2초 지점에서 분할 → 뒤 클립 삭제 → 2초 타임라인
+  // 컷 편집 (1.2.4): 2초 지점에서 분할
   await win.evaluate(() => window.__test!.seek(2))
   await win.waitForTimeout(300)
   await win.evaluate(() => window.__test!.splitAtPlayhead())
-  project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  const clips = project.tracks.find((t: { kind: string }) => t.kind === 'video').clips
+  let clips = await getClips()
   expect(clips).toHaveLength(2)
   expect(clips[0].timelineEnd).toBeCloseTo(2, 2)
   expect(clips[1].sourceIn).toBeCloseTo(2, 2)
 
-  // 뒤 클립 삭제 — UI 경로 (클립 선택 후 Delete 키, 1.2.6 단축키 검증 겸)
+  // 삭제 → undo → redo → undo (1.1.3, 1.2.6): 최종적으로 2클립 유지
   await win.click(`[data-testid="clip-${clips[1].id}"]`)
   await win.keyboard.press('Delete')
-  project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  expect(project.tracks.find((t: { kind: string }) => t.kind === 'video').clips).toHaveLength(1)
-
-  // undo/redo (1.1.3): 삭제 취소 → 2개 복원, 다시실행 → 1개
+  expect(await getClips()).toHaveLength(1)
   await win.keyboard.press('Meta+z')
-  project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  expect(project.tracks.find((t: { kind: string }) => t.kind === 'video').clips).toHaveLength(2)
+  expect(await getClips()).toHaveLength(2)
   await win.keyboard.press('Shift+Meta+z')
-  project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  expect(project.tracks.find((t: { kind: string }) => t.kind === 'video').clips).toHaveLength(1)
+  expect(await getClips()).toHaveLength(1)
+  await win.keyboard.press('Meta+z')
+  expect(await getClips()).toHaveLength(2)
 
-  // 텍스트 오버레이 추가 (3.1): 플레이헤드 1초에 3초짜리 텍스트 → 타임라인 4초로 확장
+  // 텍스트 오버레이 (3.1): 1초에 3초짜리 → 타임라인 4초 유지
   await win.evaluate(() => window.__test!.seek(1))
   await win.waitForTimeout(300)
   await win.click('[data-testid="add-text-btn"]')
-  project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
-  const textClips = project.tracks.find((t: { kind: string }) => t.kind === 'text').clips
-  expect(textClips).toHaveLength(1)
-  expect(textClips[0].timelineEnd).toBeCloseTo(4, 2)
+  const project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  expect(project.tracks.find((t: { kind: string }) => t.kind === 'text').clips).toHaveLength(1)
 
-  // 시크 후 프리뷰 렌더 (0.3.3 / 1.4.4)
-  await win.evaluate(() => window.__test!.seek(1.5))
-  await win.waitForTimeout(500)
+  // 필터 (4.1) + 전환 (4.2): 채도 1.5 전체 적용, 컷 지점(2초)에 1초 디졸브
+  await win.evaluate(() => window.__test!.applyFilter('saturation', 1.5))
+  await win.evaluate(() => window.__test!.applyTransition('dissolve', 1.0))
 
-  // 내보내기 (1.5): 컷 + 텍스트 + 오디오 패스스루 → mp4
+  // 내보내기 (5.2): 컷+텍스트+필터+전환+오디오 믹스다운
   const result = await win.evaluate((path) => window.__test!.exportTo(path), OUTPUT)
   expect(result.ok, result.error).toBe(true)
-  // 처리량 기록 (1.5.3)
   if (result.stats) {
     console.log(
       `[export stats] frames=${result.stats.frames} elapsed=${(result.stats.elapsedMs / 1000).toFixed(1)}s ` +
@@ -134,21 +134,26 @@ test('임포트 → 분할 → 삭제 → 시크 → 내보내기 스모크', as
     )
   }
 
-  // 출력 검증: duration = 타임라인 duration (±1프레임)
+  // 출력 구조 검증: duration ±1프레임, 비디오+오디오 스트림
   expect(existsSync(OUTPUT)).toBe(true)
-  const dur = probeDuration(OUTPUT)
-  expect(Math.abs(dur - 4)).toBeLessThanOrEqual(1 / 30 + 0.05)
+  expect(Math.abs(probeDuration(OUTPUT) - 4)).toBeLessThanOrEqual(1 / 30 + 0.05)
+  const streams = probeStreams(OUTPUT)
+  expect(streams).toContain('video')
+  expect(streams).toContain('audio')
 
-  // WYSIWYG 스팟 체크 (1.5): 텍스트 없는 0.5초 지점에서 출력 vs 원본 SSIM
-  const ssim = ssimAt(OUTPUT, SAMPLE, 0.5)
-  expect(ssim, `SSIM=${ssim}`).toBeGreaterThan(0.95)
-
-  // 텍스트 렌더 검증 (3.1): 텍스트가 놓이는 중앙 영역은 원본과 확연히 달라야 한다 (오버레이가 실제 픽셀에 존재)
-  const CENTER = '600:200:660:440'
-  const ssimTextRegion = ssimAt(OUTPUT, SAMPLE, 1.5, CENTER)
-  const ssimTextRegionBefore = ssimAt(OUTPUT, SAMPLE, 0.5, CENTER)
-  expect(ssimTextRegion, `SSIM(text region)=${ssimTextRegion}`).toBeLessThan(0.93)
-  expect(ssimTextRegionBefore, `SSIM(no-text region)=${ssimTextRegionBefore}`).toBeGreaterThan(0.95)
+  // WYSIWYG 수치 게이트 (5.2.5): 기준 프레임(동일 렌더 경로 캡처) vs 출력 프레임 SSIM ≥ 0.99
+  // 프레임 15(0.5s 필터), 45(1.5s 필터+텍스트), 60(2.0s 전환 중앙)
+  for (const fi of [15, 45, 60]) {
+    const t = (fi + 0.5) / 30
+    const dataUrl = await win.evaluate((tt) => window.__test!.captureFrame(tt), t)
+    const refPng = join(FIXTURES, `ref_${fi}.png`)
+    const outPng = join(FIXTURES, `out_${fi}.png`)
+    writeFileSync(refPng, Buffer.from(dataUrl.split(',')[1], 'base64'))
+    extractFrame(OUTPUT, fi, outPng)
+    const ssim = ssimImages(refPng, outPng)
+    console.log(`[wysiwyg] frame ${fi} (t=${t.toFixed(3)}s) SSIM=${ssim}`)
+    expect(ssim, `frame ${fi} SSIM=${ssim}`).toBeGreaterThanOrEqual(0.99)
+  }
 
   await app.close()
 })

@@ -8,7 +8,7 @@
 import type { Project } from '@shared/model/types'
 import { Compositor } from './compositor'
 import { AudioEngine } from './audioEngine'
-import { buildLayersAccurate, buildLayersPoll } from './scene'
+import { buildSceneAccurate, buildScenePoll } from './scene'
 import { projectDuration } from '@renderer/state/commands'
 import { useEditor } from '@renderer/state/store'
 
@@ -34,6 +34,11 @@ export class PlaybackController {
   private ensureAudio(project: Project): AudioEngine {
     if (!this.audio) this.audio = new AudioEngine(project.settings.sampleRate)
     return this.audio
+  }
+
+  /** 내보내기 믹스다운 등 외부에서 오디오 엔진(버퍼 캐시) 접근 */
+  ensureAudioEngine(project: Project): AudioEngine {
+    return this.ensureAudio(project)
   }
 
   /** 임포트 직후 오디오 버퍼 프리로드 (재생 시작 지연 방지) */
@@ -91,9 +96,9 @@ export class PlaybackController {
       return
     }
     if (!this.compositor) return
-    const layers = await buildLayersAccurate(project, clamped)
+    const items = await buildSceneAccurate(project, clamped, 'preview')
     if (gen !== this.seekGen || !this.compositor) return
-    this.compositor.render(layers, project.settings.backgroundColor)
+    this.compositor.render(items, project.settings.backgroundColor)
   }
 
   /** 편집 조작 후 정지 화면 갱신 */
@@ -126,8 +131,8 @@ export class PlaybackController {
     this.audio?.applyLiveVolumes(project)
 
     if (this.compositor) {
-      const layers = buildLayersPoll(project, t)
-      this.compositor.render(layers, project.settings.backgroundColor)
+      const items = buildScenePoll(project, t)
+      this.compositor.render(items, project.settings.backgroundColor)
     }
     this.rafId = requestAnimationFrame(this.loop)
   }

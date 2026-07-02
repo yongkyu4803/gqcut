@@ -26,6 +26,8 @@ export interface EditorState {
   pxPerSec: number
   exportProgress: { active: boolean; percent: number; cancel?: () => void } | null
   proxyJobs: Record<string, number> // assetId -> percent
+  projectPath: string | null // 현재 프로젝트 파일 경로 (6.1)
+  savedRevision: number // 마지막 저장 시점의 히스토리 길이 (더티 판정)
 
   dispatch(label: string, fn: (p: Project) => Project): void
   undo(): void
@@ -38,6 +40,8 @@ export interface EditorState {
   setZoom(pxPerSec: number): void
   setExportProgress(p: EditorState['exportProgress']): void
   setProxyProgress(assetId: string, percent: number | null): void
+  setProjectPath(path: string | null): void
+  markSaved(): void
 }
 
 const MAX_HISTORY = 200
@@ -53,6 +57,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   pxPerSec: 80,
   exportProgress: null,
   proxyJobs: {},
+  projectPath: null,
+  savedRevision: 0,
 
   dispatch(label, fn) {
     const before = get().project
@@ -81,7 +87,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   replaceProject(p) {
-    set({ project: p, past: [], future: [], selectedClipId: null, playhead: 0 })
+    set({ project: p, past: [], future: [], selectedClipId: null, playhead: 0, savedRevision: 0 })
   },
 
   select: (clipId) => set({ selectedClipId: clipId }),
@@ -95,7 +101,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (percent === null) delete jobs[assetId]
       else jobs[assetId] = percent
       return { proxyJobs: jobs }
-    })
+    }),
+  setProjectPath: (path) => set({ projectPath: path }),
+  markSaved: () => set((s) => ({ savedRevision: s.past.length }))
 }))
 
 /** 프로젝트 직렬화 (1.1.4) */

@@ -1,15 +1,14 @@
 /**
  * e2e 테스트 훅 (1.6) — Playwright 가 다이얼로그 없이 임포트/편집/내보내기를 구동한다.
- * E2E 환경(또는 dev)에서만 주입.
+ * E2E(또는 dev) 환경에서만 주입.
  */
-import { createMediaClip } from '@shared/model/factory'
+import { createMediaClip, genId } from '@shared/model/factory'
+import type { Transition } from '@shared/model/types'
 import { useEditor, serializeProject } from './state/store'
-import { addClip } from './state/commands'
+import { addClip, splitClip, updateClip } from './state/commands'
 import { importFile } from './media/import'
 import { playback } from './engine/playback'
-import { exportTimeline } from './engine/exporter'
-import { genId } from '@shared/model/factory'
-import { splitClip } from './state/commands'
+import { captureReferenceFrame, exportTimeline, DEFAULT_EXPORT_SETTINGS } from './engine/exporter'
 
 export function installTestHooks(): void {
   window.__test = {
@@ -41,8 +40,33 @@ export function installTestHooks(): void {
       return serializeProject(useEditor.getState().project)
     },
 
+    /** 필터 적용 (4.1) — 첫 비디오 트랙의 모든 클립에 */
+    applyFilter(type: string, value: number): void {
+      const s = useEditor.getState()
+      const track = s.project.tracks.find((t) => t.kind === 'video')
+      if (!track) return
+      for (const clip of track.clips) {
+        s.dispatch('필터(e2e)', (p) => updateClip(p, clip.id, { effects: [{ type, params: { value }, enabled: true }] }))
+      }
+    },
+
+    /** 전환 적용 (4.2) — 첫 비디오 트랙의 첫 인접 쌍에 */
+    applyTransition(type: string, duration: number): void {
+      const s = useEditor.getState()
+      const track = s.project.tracks.find((t) => t.kind === 'video')
+      if (!track || track.clips.length < 2) return
+      const sorted = [...track.clips].sort((a, b) => a.timelineStart - b.timelineStart)
+      const t: Transition = { type, duration }
+      s.dispatch('전환(e2e)', (p) => updateClip(p, sorted[0].id, { transitionOut: t }))
+    },
+
+    /** 기준 프레임 캡처 (4.2.4/5.2.5) — 내보내기와 동일 경로 렌더의 PNG dataURL */
+    captureFrame(t: number): Promise<string> {
+      return captureReferenceFrame(useEditor.getState().project, t)
+    },
+
     async exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }> {
-      const handle = exportTimeline(useEditor.getState().project, path, () => {})
+      const handle = exportTimeline(useEditor.getState().project, path, DEFAULT_EXPORT_SETTINGS, () => {})
       const result = await handle.promise
       return { ok: result.ok, error: result.error, stats: result.stats }
     }

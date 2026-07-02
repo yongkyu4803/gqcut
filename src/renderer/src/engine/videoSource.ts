@@ -235,18 +235,43 @@ export class VideoSource {
   }
 }
 
-/** 자산 경로별 VideoSource / ImageBitmap 캐시 */
-const videoSources = new Map<string, Promise<VideoSource>>()
+/** 자산 경로별 VideoSource / ImageBitmap 캐시 (LRU 상한 — 6.2.2) */
+const videoSources = new Map<string, { promise: Promise<VideoSource>; lastUsed: number }>()
 const imageBitmaps = new Map<string, Promise<ImageBitmap>>()
+const MAX_SOURCES = 8
 
-export function getVideoSource(filePath: string): Promise<VideoSource> {
-  let p = videoSources.get(filePath)
-  if (!p) {
-    p = VideoSource.load(filePath)
-    p.catch(() => videoSources.delete(filePath))
-    videoSources.set(filePath, p)
+/**
+ * instanceKey: 같은 파일의 두 구간이 동시에 필요할 때(전환 A/B) 별도 디코더 인스턴스를 만든다.
+ */
+export function getVideoSource(filePath: string, instanceKey?: string): Promise<VideoSource> {
+  const key = instanceKey ? `${filePath}|${instanceKey}` : filePath
+  let entry = videoSources.get(key)
+  if (!entry) {
+    // LRU 정리: 상한 초과 시 가장 오래 안 쓴 소스 dispose (샘플 데이터 메모리 회수)
+    if (videoSources.size >= MAX_SOURCES) {
+      const oldest = [...videoSources.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0]
+      if (oldest) {
+        void oldest[1].promise.then((s) => s.dispose()).catch(() => {})
+        videoSources.delete(oldest[0])
+      }
+    }
+    const promise = VideoSource.load(filePath)
+    promise.catch(() => videoSources.delete(key))
+    entry = { promise, lastUsed: Date.now() }
+    videoSources.set(key, entry)
   }
-  return p
+  entry.lastUsed = Date.now()
+  return entry.promise
+}
+
+/** 자산 경로가 바뀌었을 때(재연결 등) 캐시 무효화 */
+export function evictVideoSource(filePath: string): void {
+  for (const [key, entry] of videoSources) {
+    if (key === filePath || key.startsWith(`${filePath}|`)) {
+      void entry.promise.then((s) => s.dispose()).catch(() => {})
+      videoSources.delete(key)
+    }
+  }
 }
 
 export function getImageBitmap(filePath: string): Promise<ImageBitmap> {

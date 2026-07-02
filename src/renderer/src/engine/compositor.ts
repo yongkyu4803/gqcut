@@ -1,24 +1,32 @@
 /**
- * WebGL 컴포지터 (1.3) — 프리뷰·내보내기가 공유하는 유일한 합성 경로 (WYSIWYG).
+ * WebGL 컴포지터 (1.3, 4.1, 4.2) — 프리뷰·내보내기가 공유하는 유일한 합성 경로 (WYSIWYG).
  *
- * 색공간/알파 규칙 (1.3.4):
- * - 텍스처 업로드 시 UNPACK_PREMULTIPLY_ALPHA_WEBGL=true → 모든 레이어는 premultiplied alpha
- * - 블렌딩: gl.blendFunc(ONE, ONE_MINUS_SRC_ALPHA) (premultiplied 표준)
- * - 셰이더는 sRGB 값을 그대로 다룬다(브라우저 디코딩 출력 = 표시 공간). 필터(Phase 4)에서
- *   linear 연산이 필요한 효과는 effects-spec 에서 변환을 명시한다.
+ * 색공간/알파 규칙 (1.3.4 / ARCHITECTURE §6.3):
+ * - 캔버스(텍스트 래스터) 업로드만 UNPACK_PREMULTIPLY_ALPHA=true. VideoFrame/ImageBitmap 은 불투명이라 불필요
+ *   (플래그를 켜면 Chromium 이 비디오 업로드에 별도 변환 경로를 타며 색이 어긋난다).
+ * - 블렌딩: premultiplied 표준 (ONE, ONE_MINUS_SRC_ALPHA)
+ * - 색 연산(필터)은 sRGB 공간 — 수식은 shared/effects-spec 에만 정의.
+ *
+ * 전환(4.2): 두 클립 레이어를 각각 FBO 에 렌더한 뒤 전환 셰이더로 블렌딩.
  */
 import type { Transform } from '@shared/model/types'
+import { COLOR_ADJUST_GLSL, NEUTRAL_ADJUST, TRANSITION_GLSL, transitionTypeId, type ColorAdjust } from '@shared/effects-spec'
 
 export interface Layer {
   source: TexImageSource | VideoFrame
-  /** 소스 픽셀 크기 */
   srcWidth: number
   srcHeight: number
   transform?: Transform
   opacity?: number
-  /** true 면 캔버스에 contain-fit 하는 기본 스케일을 적용 (비디오/이미지), false 면 픽셀 1:1 (텍스트) */
+  /** true 면 캔버스에 contain-fit 하는 기본 스케일 (비디오/이미지), false 면 픽셀 1:1 (텍스트) */
   fitToCanvas: boolean
+  /** 색보정 (effects-spec resolveColorAdjust 결과) */
+  adjust?: ColorAdjust
 }
+
+export type SceneItem =
+  | { kind: 'layer'; layer: Layer }
+  | { kind: 'transition'; a: Layer | null; b: Layer | null; type: string; progress: number }
 
 const VERT = `
 attribute vec2 aPos;
@@ -31,25 +39,41 @@ void main() {
   vUV = aUV;
 }`
 
-const FRAG = `
+const FRAG_LAYER = `
 precision mediump float;
 varying vec2 vUV;
 uniform sampler2D uTex;
 uniform float uOpacity;
+uniform float uBrightness;
+uniform float uContrast;
+uniform float uSaturation;
+uniform float uTemperature;
+${COLOR_ADJUST_GLSL}
 void main() {
   vec4 c = texture2D(uTex, vUV);
-  gl_FragColor = c * uOpacity; // premultiplied: rgb 에도 opacity 곱
+  vec3 rgb = c.a > 0.001 ? c.rgb / c.a : c.rgb;
+  rgb = applyColorAdjust(rgb, uBrightness, uContrast, uSaturation, uTemperature);
+  gl_FragColor = vec4(rgb * c.a, c.a) * uOpacity; // premultiplied 유지
 }`
+
+interface Fbo {
+  framebuffer: WebGLFramebuffer
+  texture: WebGLTexture
+}
 
 export class Compositor {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas
   width: number
   height: number
   private gl: WebGLRenderingContext
+  private layerProg: WebGLProgram
+  private transProg: WebGLProgram
   private texture: WebGLTexture
-  private uMatrix: WebGLUniformLocation
-  private uOpacity: WebGLUniformLocation
+  private fboA: Fbo
+  private fboB: Fbo
   private pixelBuf: Uint8Array | null = null
+  private uni: Record<string, WebGLUniformLocation> = {}
+  private tUni: Record<string, WebGLUniformLocation> = {}
 
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas, width: number, height: number) {
     this.canvas = canvas
@@ -66,22 +90,11 @@ export class Compositor {
     if (!gl) throw new Error('WebGL 컨텍스트를 만들 수 없습니다')
     this.gl = gl
 
-    const compile = (type: number, src: string): WebGLShader => {
-      const sh = gl.createShader(type)!
-      gl.shaderSource(sh, src)
-      gl.compileShader(sh)
-      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(`셰이더 컴파일 실패: ${gl.getShaderInfoLog(sh)}`)
-      return sh
-    }
-    const program = gl.createProgram()!
-    gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT))
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG))
-    gl.linkProgram(program)
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`프로그램 링크 실패: ${gl.getProgramInfoLog(program)}`)
-    gl.useProgram(program)
+    this.layerProg = this.buildProgram(VERT, FRAG_LAYER)
+    this.transProg = this.buildProgram(VERT, TRANSITION_GLSL)
 
-    // 단위 쿼드. 위치는 픽셀 공간(y 아래 방향) 기준 — 변환 행렬이 y를 반전해 NDC 로 보낸다.
-    // 따라서 aPos y=-0.5 가 화면 위쪽 → 이미지 상단(v=0)과 짝지어야 방향이 맞는다.
+    // 단위 쿼드. 위치는 픽셀 공간(y 아래 방향) 기준 — 레이어 행렬이 y를 반전해 NDC 로 보낸다.
+    // aPos y=-0.5 가 화면 위쪽 → 이미지 상단(v=0)과 짝. (전환 패스는 y 반전 없는 행렬 + FBO v=1=상단으로 상쇄)
     const quad = new Float32Array([
       -0.5, -0.5, 0, 0,
       0.5, -0.5, 1, 0,
@@ -91,47 +104,127 @@ export class Compositor {
     const vbo = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo)
     gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW)
-    const aPos = gl.getAttribLocation(program, 'aPos')
-    const aUV = gl.getAttribLocation(program, 'aUV')
-    gl.enableVertexAttribArray(aPos)
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0)
-    gl.enableVertexAttribArray(aUV)
-    gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, 16, 8)
+    for (const prog of [this.layerProg, this.transProg]) {
+      gl.useProgram(prog)
+      const aPos = gl.getAttribLocation(prog, 'aPos')
+      const aUV = gl.getAttribLocation(prog, 'aUV')
+      gl.enableVertexAttribArray(aPos)
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0)
+      gl.enableVertexAttribArray(aUV)
+      gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, 16, 8)
+    }
 
-    this.uMatrix = gl.getUniformLocation(program, 'uMatrix')!
-    this.uOpacity = gl.getUniformLocation(program, 'uOpacity')!
+    gl.useProgram(this.layerProg)
+    for (const name of ['uMatrix', 'uOpacity', 'uBrightness', 'uContrast', 'uSaturation', 'uTemperature']) {
+      this.uni[name] = gl.getUniformLocation(this.layerProg, name)!
+    }
+    gl.useProgram(this.transProg)
+    for (const name of ['uMatrix', 'uTexA', 'uTexB', 'uProgress', 'uType']) {
+      this.tUni[name] = gl.getUniformLocation(this.transProg, name)!
+    }
 
-    this.texture = gl.createTexture()!
-    gl.bindTexture(gl.TEXTURE_2D, this.texture)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    this.texture = this.createTex()
+    this.fboA = this.createFbo(width, height)
+    this.fboB = this.createFbo(width, height)
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA) // premultiplied alpha 표준 (1.3.4)
     gl.viewport(0, 0, width, height)
   }
 
-  /** 레이어 배열을 아래→위 순서로 합성 (호출자가 순서를 보장) */
-  render(layers: Layer[], backgroundColor: string): void {
+  private buildProgram(vert: string, frag: string): WebGLProgram {
     const gl = this.gl
+    const compile = (type: number, src: string): WebGLShader => {
+      const sh = gl.createShader(type)!
+      gl.shaderSource(sh, src)
+      gl.compileShader(sh)
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(`셰이더 컴파일 실패: ${gl.getShaderInfoLog(sh)}`)
+      return sh
+    }
+    const prog = gl.createProgram()!
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vert))
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, frag))
+    gl.linkProgram(prog)
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(`프로그램 링크 실패: ${gl.getProgramInfoLog(prog)}`)
+    return prog
+  }
+
+  private createTex(): WebGLTexture {
+    const gl = this.gl
+    const tex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    return tex
+  }
+
+  private createFbo(width: number, height: number): Fbo {
+    const gl = this.gl
+    const texture = this.createTex()
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+    const framebuffer = gl.createFramebuffer()!
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    return { framebuffer, texture }
+  }
+
+  /** 장면 아이템을 아래→위 순서로 합성 */
+  render(items: SceneItem[], backgroundColor: string): void {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     const [r, g, b] = hexToRgb(backgroundColor)
     gl.clearColor(r, g, b, 1)
     gl.clear(gl.COLOR_BUFFER_BIT)
 
-    for (const layer of layers) {
-      this.drawLayer(layer)
+    for (const item of items) {
+      if (item.kind === 'layer') {
+        this.drawLayer(item.layer)
+      } else {
+        this.drawTransition(item)
+      }
     }
+  }
+
+  private drawTransition(item: Extract<SceneItem, { kind: 'transition' }>): void {
+    const gl = this.gl
+    // 1) 각 클립 레이어를 FBO 에 렌더 (투명 배경)
+    for (const [fbo, layer] of [
+      [this.fboA, item.a],
+      [this.fboB, item.b]
+    ] as Array<[Fbo, Layer | null]>) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.framebuffer)
+      gl.clearColor(0, 0, 0, 0)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+      if (layer) this.drawLayer(layer)
+    }
+    // 2) 전환 셰이더로 두 FBO 를 기본 프레임버퍼에 블렌딩
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    gl.useProgram(this.transProg)
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.fboA.texture)
+    gl.uniform1i(this.tUni.uTexA, 0)
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, this.fboB.texture)
+    gl.uniform1i(this.tUni.uTexB, 1)
+    gl.uniform1f(this.tUni.uProgress, item.progress)
+    gl.uniform1i(this.tUni.uType, transitionTypeId(item.type))
+    // 풀스크린: y 반전 없는 스케일-2 행렬 (FBO 의 v=1 이 화면 상단과 일치)
+    gl.uniformMatrix3fv(this.tUni.uMatrix, false, new Float32Array([2, 0, 0, 0, 2, 0, 0, 0, 1]))
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+    gl.activeTexture(gl.TEXTURE0)
   }
 
   private drawLayer(layer: Layer): void {
     const gl = this.gl
+    gl.useProgram(this.layerProg)
+    gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.texture)
-    // 색공간 규칙 (1.3.4): VideoFrame/ImageBitmap 은 불투명 → 프리멀티플라이 불필요.
-    // 이 플래그가 켜져 있으면 Chromium 이 비디오 프레임 업로드에 별도 변환 경로를 타면서
-    // 색이 어긋난다(실측: 녹색 189→159). 알파가 실재하는 캔버스(텍스트 래스터)에만 적용한다.
-    const needsPremultiply = !(typeof VideoFrame !== 'undefined' && layer.source instanceof VideoFrame) && !(layer.source instanceof ImageBitmap)
+    const needsPremultiply =
+      !(typeof VideoFrame !== 'undefined' && layer.source instanceof VideoFrame) && !(layer.source instanceof ImageBitmap)
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, needsPremultiply)
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
@@ -142,7 +235,6 @@ export class Compositor {
     }
 
     const t = layer.transform ?? { x: 0, y: 0, scale: 1, rotation: 0 }
-    // 기본 스케일: contain-fit(비디오/이미지) 또는 1:1(텍스트 래스터)
     const base = layer.fitToCanvas ? Math.min(this.width / layer.srcWidth, this.height / layer.srcHeight) : 1
     const w = layer.srcWidth * base * t.scale
     const h = layer.srcHeight * base * t.scale
@@ -150,18 +242,22 @@ export class Compositor {
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
 
-    // 픽셀 공간(중심 원점, y 아래 방향)에서 단위 쿼드에 회전·스케일·이동을 적용한 뒤 NDC 로 변환.
-    // P_px = R(θ)·S(w,h)·p + (t.x, t.y) → NDC: x·(2/W), y·(−2/H)
+    // 픽셀 공간(중심 원점, y 아래 방향) → NDC. P_px = R(θ)·S(w,h)·p + (t.x, t.y)
     const px2ndcX = 2 / this.width
     const px2ndcY = -2 / this.height
     const m = new Float32Array([
-      cos * w * px2ndcX, sin * w * px2ndcY, 0, // 1열: x축 기저
-      -sin * h * px2ndcX, cos * h * px2ndcY, 0, // 2열: y축 기저
-      t.x * px2ndcX, t.y * px2ndcY, 1 // 3열: 이동
+      cos * w * px2ndcX, sin * w * px2ndcY, 0,
+      -sin * h * px2ndcX, cos * h * px2ndcY, 0,
+      t.x * px2ndcX, t.y * px2ndcY, 1
     ])
 
-    gl.uniformMatrix3fv(this.uMatrix, false, m)
-    gl.uniform1f(this.uOpacity, Math.max(0, Math.min(1, layer.opacity ?? 1)))
+    const adjust = layer.adjust ?? NEUTRAL_ADJUST
+    gl.uniformMatrix3fv(this.uni.uMatrix, false, m)
+    gl.uniform1f(this.uni.uOpacity, Math.max(0, Math.min(1, layer.opacity ?? 1)))
+    gl.uniform1f(this.uni.uBrightness, adjust.brightness)
+    gl.uniform1f(this.uni.uContrast, adjust.contrast)
+    gl.uniform1f(this.uni.uSaturation, adjust.saturation)
+    gl.uniform1f(this.uni.uTemperature, adjust.temperature)
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   }
 
@@ -173,11 +269,20 @@ export class Compositor {
     this.canvas.height = height
     this.gl.viewport(0, 0, width, height)
     this.pixelBuf = null
+    // FBO 재생성
+    const gl = this.gl
+    for (const fbo of [this.fboA, this.fboB]) {
+      gl.deleteFramebuffer(fbo.framebuffer)
+      gl.deleteTexture(fbo.texture)
+    }
+    this.fboA = this.createFbo(width, height)
+    this.fboB = this.createFbo(width, height)
   }
 
   /** 현재 프레임버퍼를 RGBA 로 읽는다 (내보내기 1.5.2). WebGL 특성상 행이 bottom-up. */
   readPixels(): Uint8Array {
     const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     const size = this.width * this.height * 4
     if (!this.pixelBuf || this.pixelBuf.length !== size) this.pixelBuf = new Uint8Array(size)
     gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, this.pixelBuf)

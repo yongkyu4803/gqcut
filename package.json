@@ -16,9 +16,12 @@
     "progress": "node scripts/progress.mjs",
     "progress:next": "node scripts/progress.mjs --next",
     "progress:all": "node scripts/progress.mjs --all",
-    "plan:validate": "node scripts/validate-plan.mjs"
+    "plan:validate": "node scripts/validate-plan.mjs",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "mp4box": "^0.5.4",
@@ -37,6 +40,7 @@
     "@typescript-eslint/parser": "^8.34.0",
     "@vitejs/plugin-react": "^4.5.0",
     "electron": "^37.2.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "eslint": "^9.29.0",
     "prettier": "^3.6.0",

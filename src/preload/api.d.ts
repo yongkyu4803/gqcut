@@ -10,6 +10,9 @@ declare global {
       splitAtPlayhead(): void
       seek(t: number): void
       getProjectJson(): string
+      applyFilter(type: string, value: number): void
+      applyTransition(type: string, duration: number): void
+      captureFrame(t: number): Promise<string>
       exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }>
     }
   }

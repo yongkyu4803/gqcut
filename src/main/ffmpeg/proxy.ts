@@ -91,6 +91,59 @@ export function makeCompatProxy(
 }
 
 /**
+ * 성능 프록시 (6.2.1) — 고해상도 소스를 720p 로 낮춰 프리뷰 전용으로 사용.
+ * 내보내기는 원본(또는 호환 프록시)을 사용하므로 화질에 영향 없음.
+ */
+export function makePerfProxy(
+  sourcePath: string,
+  durationSec: number,
+  fps: number,
+  onProgress: (percent: number) => void
+): ProxyJob {
+  const outPath = join(cacheDir('perf-proxy'), `${cacheKey(sourcePath)}_720.mp4`)
+  if (existsSync(outPath)) {
+    onProgress(100)
+    return { cancel: () => {}, promise: Promise.resolve(outPath) }
+  }
+
+  const gop = Math.max(1, Math.round(fps))
+  const args = [
+    '-y',
+    '-i', sourcePath,
+    '-map', '0:v:0', // 프리뷰 비디오 전용 — 오디오는 wav 추출본 사용
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+    '-pix_fmt', 'yuv420p',
+    '-vf', 'scale=-2:720,scale=in_color_matrix=auto:out_color_matrix=bt709:out_range=tv',
+    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
+    '-vsync', 'cfr', '-r', String(gop),
+    '-g', String(gop), '-keyint_min', String(gop),
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats',
+    outPath
+  ]
+
+  const child = spawn(ffmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  let stderrTail = ''
+  child.stderr.on('data', (d: Buffer) => {
+    stderrTail = (stderrTail + d.toString()).slice(-2000)
+  })
+  child.stdout.on('data', (d: Buffer) => {
+    const m = /out_time_us=(\d+)/.exec(d.toString())
+    if (m && durationSec > 0) onProgress(Math.min(99, (Number(m[1]) / 1e6 / durationSec) * 100))
+  })
+  const promise = new Promise<string>((resolvePromise, reject) => {
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        onProgress(100)
+        resolvePromise(outPath)
+      } else reject(new Error(`성능 프록시 생성 실패 (exit ${code}): ${stderrTail.split('\n').slice(-2).join(' ')}`))
+    })
+  })
+  return { cancel: () => child.kill('SIGKILL'), promise }
+}
+
+/**
  * 오디오 트랙을 wav(pcm f32le) 로 추출 — 재생/파형/믹스다운 공용 (1.4.5, 2.1)
  * 오디오가 없으면 null.
  */

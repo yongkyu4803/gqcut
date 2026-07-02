@@ -1,12 +1,13 @@
 # Video Editor (CapCut 유사 데스크톱 영상 편집기)
 
-> 상태: **Phase 0~3 구현 완료 (자동 검증 통과 · 일부 육안/청취 검증 대기)** · 대상 플랫폼: Windows / macOS (Electron)
+> 상태: **Phase 0~6 구현 완료 (자동 검증 통과 · 육안/청취 검증 및 코드사이닝 대기)** · 대상 플랫폼: Windows / macOS (Electron)
 
 ```bash
 npm install
 npm run dev        # 편집기 실행
-npm run test       # 유닛 테스트 (모델/커맨드/시간환산)
-npm run e2e        # 빌드 + e2e 스모크 (임포트→분할→undo→텍스트→내보내기→SSIM 검증)
+npm run test       # 유닛 테스트 (모델/커맨드/시간환산/effects-spec)
+npm run e2e        # 빌드 + e2e 스모크 (임포트→컷→필터/전환/텍스트→내보내기→WYSIWYG SSIM≥0.99)
+npm run dist:mac   # macOS 패키징 (서명 없이: CSC_IDENTITY_AUTO_DISCOVERY=false)
 ```
 
 숏폼~중편 영상을 쉽게 편집하고 내보낼 수 있는 데스크톱 영상 편집기. 실제 배포/수익화를 목표로 한다.
@@ -62,12 +63,14 @@ npm run plan:validate       # 계획 파일 구조/일관성 검증
 
 ### 구현 현황 (2026-07-02)
 
-Phase 0~3 코딩 완료 — 진행률 66% (60/91), `npm run progress` 로 확인.
+Phase 0~6 코딩 완료 — `npm run progress` 로 확인.
 
-- **자동 검증 완료**: IPC, 프로브(VFR/코덱/색공간 판별), 호환 프록시(BT.709 정규화), 임포트→첫 프레임, 데이터 모델+undo/redo(유닛 16개), 분할/삭제, 프레임 정확 시크, WebGL 합성, 텍스트 오버레이(픽셀 검증), 내보내기(duration ±1프레임, SSIM 0.983, 취소), e2e 스모크
-- **스파이크 실측 (1.5)**: 렌더 위치 = 보이는 렌더러 OffscreenCanvas 확정 · 파이프 497MB/s · 1080p30 내보내기 2.0× 실시간
-- **육안/청취 검증 대기 (`verifying` 상태)**: 타임라인 드래그/트림/스냅 감각, A/V 싱크 체감(±40ms), 클립 경계 무빠짐 재생, 믹싱/페이드 청취, 텍스트 스타일/애니메이션 시각 확인, 장시간 메모리 — `npm run dev` 로 확인 후 done 전환
-- **원격 필요**: CI(GitHub Actions)는 워크플로 작성 완료, 저장소 push 후 첫 실행 확인 필요
+- **자동 검증 완료**: IPC · 프로브(VFR/코덱/색공간) · 호환/성능 프록시 · 데이터 모델+undo/redo(유닛 22개) · 컷 편집 · 프레임 정확 시크 · WebGL 합성 · 텍스트 · **필터/전환(effects-spec 단일 정의)** · **오디오 믹스다운(OfflineAudioContext)** · 내보내기 프리셋 · **WYSIWYG 수치 게이트: 기준 프레임 SSIM 0.9992 (≥0.99)** · duration ±1프레임 · 패키징(DMG/ZIP 빌드 + 패키징 앱 부팅·ffmpeg 동작 확인)
+- **실측**: 내보내기 파이프 ~500MB/s, 1080p30 타임라인 2.0× 실시간
+- **육안/청취 검증 대기 (`verifying`)**: 드래그/트림/스냅 감각, A/V 싱크 체감, 무끊김 재생, 믹싱/페이드 청취, 전환/애니메이션 시각 확인(서로 다른 두 클립으로), 자동저장 복구 시나리오, 4K 소스 성능 — `npm run dev` 로 확인 후 done 전환
+- **외부 요건 대기**: 6.3.2 코드사이닝/공증(Apple Developer 인증서 + `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`), 자동 업데이트 첫 게시(GitHub Releases), CI 첫 실행(저장소 push)
+- **미착수(optional)**: 3.2 자동 자막(STT) — Whisper 로컬 vs API 결정 필요
+- ⚠ **라이선스**: 번들 FFmpeg 는 libx264 포함 GPL 빌드 — 상용 배포 전 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) 의 전환 방안(LGPL+하드웨어 인코더) 검토 필수
 
 ### 계획 개정 이력
 

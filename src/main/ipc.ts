@@ -4,10 +4,10 @@
  */
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
 import { probeMedia } from './ffmpeg/probe'
-import { extractAudioWav, makeCompatProxy } from './ffmpeg/proxy'
-import { cancelExport, finishExport, startExport, writeFrame } from './export'
+import { extractAudioWav, makeCompatProxy, makePerfProxy } from './ffmpeg/proxy'
+import { checkAutosave, clearAutosave, openProjectFrom, saveProjectTo, writeAutosave } from './project'
+import { audioDone, cancelExport, finishExport, startExport, writeAudioChunk, writeFrame } from './export'
 import type { ExportStartOptions } from '../shared/ipc-types'
 
 export function registerIpcHandlers(): void {
@@ -45,6 +45,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('media:extractAudio', (_e, path: string, sampleRate: number) => extractAudioWav(path, sampleRate))
 
+  // 성능 프록시 (6.2.1): 고해상도 소스 → 720p 편집용. 내보내기는 원본 사용.
+  ipcMain.handle('media:makePerfProxy', async (e, path: string, jobId: string) => {
+    const probe = await probeMedia(path)
+    const sender = e.sender
+    const job = makePerfProxy(path, probe.durationSec, Math.min(60, Math.round(probe.fps ?? 30)), (percent) => {
+      if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent, done: false })
+    })
+    const proxyPath = await job.promise
+    if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent: 100, done: true, proxyPath })
+    return proxyPath
+  })
+
   ipcMain.handle('media:fileExists', (_e, path: string) => existsSync(path))
 
   ipcMain.handle('project:saveDialog', async (e, json: string) => {
@@ -54,9 +66,11 @@ export function registerIpcHandlers(): void {
       filters: [{ name: '프로젝트', extensions: ['gqproj'] }]
     })
     if (result.canceled || !result.filePath) return null
-    await writeFile(result.filePath, json, 'utf8')
+    await saveProjectTo(result.filePath, json)
     return result.filePath
   })
+
+  ipcMain.handle('project:save', (_e, path: string, json: string) => saveProjectTo(path, json))
 
   ipcMain.handle('project:openDialog', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -66,8 +80,12 @@ export function registerIpcHandlers(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const path = result.filePaths[0]
-    return { path, json: await readFile(path, 'utf8') }
+    return { path, json: await openProjectFrom(path) }
   })
+
+  ipcMain.handle('project:autosave', (_e, json: string, originalPath: string | null) => writeAutosave(json, originalPath))
+  ipcMain.handle('project:checkAutosave', () => checkAutosave())
+  ipcMain.handle('project:clearAutosave', () => clearAutosave())
 
   ipcMain.handle('export:saveDialog', async (e, defaultName: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -79,6 +97,8 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('export:start', (_e, opts: ExportStartOptions) => startExport(opts))
+  ipcMain.handle('export:audioChunk', (_e, jobId: string, chunk: ArrayBuffer) => writeAudioChunk(jobId, chunk))
+  ipcMain.handle('export:audioDone', (_e, jobId: string) => audioDone(jobId))
   ipcMain.handle('export:frame', (_e, jobId: string, frame: ArrayBuffer) => writeFrame(jobId, frame))
   ipcMain.handle('export:finish', (_e, jobId: string) => finishExport(jobId))
   ipcMain.handle('export:cancel', (_e, jobId: string) => cancelExport(jobId))

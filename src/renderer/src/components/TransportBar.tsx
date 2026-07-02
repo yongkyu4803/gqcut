@@ -1,12 +1,14 @@
 /**
  * 트랜스포트 — 재생/일시정지/정지, 타임코드, 분할, 텍스트 추가, 저장/열기, 내보내기
  */
+import { useState } from 'react'
 import { createTextClip, genId } from '@shared/model/factory'
 import { formatTimecode } from '@shared/time'
 import { useEditor, serializeProject, deserializeProject } from '@renderer/state/store'
 import { addClip, projectDuration, splitClip } from '@renderer/state/commands'
 import { playback } from '@renderer/engine/playback'
-import { exportTimeline } from '@renderer/engine/exporter'
+import { exportTimeline, type ExportSettings } from '@renderer/engine/exporter'
+import { ExportDialog } from './ExportDialog'
 
 export function TransportBar(): React.JSX.Element {
   const project = useEditor((s) => s.project)
@@ -31,8 +33,19 @@ export function TransportBar(): React.JSX.Element {
     useEditor.getState().select(clip.id)
   }
 
+  const [showExportDialog, setShowExportDialog] = useState(false)
+  const projectPath = useEditor((s) => s.projectPath)
+
   const save = async (): Promise<void> => {
-    await window.editor.saveProjectDialog(serializeProject(project))
+    const json = serializeProject(project)
+    if (projectPath) {
+      await window.editor.saveProject(projectPath, json)
+    } else {
+      const path = await window.editor.saveProjectDialog(json)
+      if (path) useEditor.getState().setProjectPath(path)
+    }
+    await window.editor.clearAutosave()
+    useEditor.getState().markSaved()
   }
 
   const open = async (): Promise<void> => {
@@ -40,6 +53,7 @@ export function TransportBar(): React.JSX.Element {
     if (!result) return
     try {
       useEditor.getState().replaceProject(deserializeProject(result.json))
+      useEditor.getState().setProjectPath(result.path)
       playback.preloadAudio(useEditor.getState().project)
       playback.refresh()
     } catch (e) {
@@ -47,11 +61,12 @@ export function TransportBar(): React.JSX.Element {
     }
   }
 
-  const doExport = async (): Promise<void> => {
+  const doExport = async (settings: ExportSettings): Promise<void> => {
+    setShowExportDialog(false)
     const out = await window.editor.saveFileDialog(`${project.name}.mp4`)
     if (!out) return
     playback.pause()
-    const handle = exportTimeline(project, out, (percent) => {
+    const handle = exportTimeline(project, out, settings, (percent) => {
       useEditor.getState().setExportProgress({ active: true, percent, cancel: handle.cancel })
     })
     useEditor.getState().setExportProgress({ active: true, percent: 0, cancel: handle.cancel })
@@ -90,9 +105,10 @@ export function TransportBar(): React.JSX.Element {
         T 텍스트
       </button>
       <span className="flex-spacer" />
-      <button className="btn export" data-testid="export-btn" onClick={() => void doExport()}>
+      <button className="btn export" data-testid="export-btn" onClick={() => setShowExportDialog(true)}>
         ⬆ 내보내기 (H.264)
       </button>
+      {showExportDialog && <ExportDialog onConfirm={(s) => void doExport(s)} onClose={() => setShowExportDialog(false)} />}
     </div>
   )
 }

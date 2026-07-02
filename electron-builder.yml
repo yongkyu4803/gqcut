@@ -1,0 +1,38 @@
+# 패키징 설정 (6.3.1) — npm run dist:mac / dist:win
+appId: ai.vessl.gqcut
+productName: GQCut
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+# ffmpeg/ffprobe 네이티브 바이너리는 asar 밖으로 (실행 가능해야 함 — binaries.ts 의 unpacked 치환과 짝)
+asarUnpack:
+  - node_modules/ffmpeg-static/**
+  - node_modules/ffprobe-static/**
+
+mac:
+  category: public.app-category.video
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # 공증 (6.3.2): 환경변수 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 필요
+  notarize: true
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+# 자동 업데이트 게시 채널 (6.3.3) — GitHub Releases. repo 생성 후 owner/repo 수정.
+publish:
+  provider: github
+  owner: vessl-ai
+  repo: gqcut

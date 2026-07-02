@@ -60,7 +60,57 @@ export async function importFile(path: string): Promise<MediaAsset> {
     }
   }
 
+  // 성능 프록시 (6.2.1): 1080p 초과 소스는 720p 프리뷰 프록시를 백그라운드 생성 (논블로킹)
+  if (probe.kind === 'video' && (probe.height ?? 0) > 1080) {
+    const jobId = `perf_${asset.id}`
+    useEditor.getState().setProxyProgress(asset.id, 0)
+    const off = window.editor.onProxyProgress((prog) => {
+      if (prog.jobId === jobId) useEditor.getState().setProxyProgress(asset.id, prog.percent)
+    })
+    void window.editor
+      .makePerfProxy(path, jobId)
+      .then((perfProxyPath) => patchAssetSilently(asset.id, { perfProxyPath }))
+      .catch(() => {})
+      .finally(() => {
+        off()
+        useEditor.getState().setProxyProgress(asset.id, null)
+      })
+  }
+
   return useEditor.getState().project.assets.find((a) => a.id === asset.id) ?? asset
+}
+
+/** 누락 파일 재연결 (6.1.3) — 새 경로로 프로브/프록시/오디오를 다시 구성 */
+export async function relinkAsset(assetId: string): Promise<void> {
+  const paths = await window.editor.openVideoDialog()
+  if (paths.length === 0) return
+  const newPath = paths[0]
+  const probe = await window.editor.probe(newPath)
+
+  patchAssetSilently(assetId, {
+    path: newPath,
+    status: 'ok',
+    proxyPath: undefined,
+    perfProxyPath: undefined,
+    audioWavPath: undefined,
+    width: probe.width,
+    height: probe.height,
+    fps: probe.fps,
+    vfr: probe.vfr,
+    codec: probe.videoCodec ?? probe.audioCodec,
+    hasAudio: probe.hasAudio
+  })
+
+  if (probe.kind === 'video' && !probe.likelyWebCodecsSupported) {
+    const proxyPath = await window.editor.makeProxy(newPath, assetId)
+    patchAssetSilently(assetId, { proxyPath })
+  }
+  if (probe.hasAudio) {
+    const wav = await window.editor.extractAudio(newPath)
+    if (wav) patchAssetSilently(assetId, { audioWavPath: wav })
+  }
+  playback.preloadAudio(useEditor.getState().project)
+  playback.refresh()
 }
 
 export async function importViaDialog(): Promise<void> {

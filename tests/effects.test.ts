@@ -1,0 +1,49 @@
+/**
+ * effects-spec 유닛 테스트 (4.1/4.2) — 파라미터 해석과 전환 시간 의미론.
+ */
+import { describe, expect, it } from 'vitest'
+import { isNeutral, NEUTRAL_ADJUST, resolveColorAdjust, transitionTypeId, transitionZone } from '@shared/effects-spec'
+
+describe('resolveColorAdjust (4.1)', () => {
+  it('빈/미지정 effects 는 중립값', () => {
+    expect(resolveColorAdjust(undefined)).toEqual(NEUTRAL_ADJUST)
+    expect(resolveColorAdjust([])).toEqual(NEUTRAL_ADJUST)
+    expect(isNeutral(resolveColorAdjust([]))).toBe(true)
+  })
+
+  it('enabled=false 는 무시된다', () => {
+    const a = resolveColorAdjust([{ type: 'saturation', params: { value: 2 }, enabled: false }])
+    expect(a.saturation).toBe(1)
+  })
+
+  it('각 필터 타입이 대응 uniform 에 매핑된다', () => {
+    const a = resolveColorAdjust([
+      { type: 'brightness', params: { value: 0.2 }, enabled: true },
+      { type: 'contrast', params: { value: 1.3 }, enabled: true },
+      { type: 'saturation', params: { value: 0.5 }, enabled: true },
+      { type: 'temperature', params: { value: -0.4 }, enabled: true }
+    ])
+    expect(a).toEqual({ brightness: 0.2, contrast: 1.3, saturation: 0.5, temperature: -0.4 })
+    expect(isNeutral(a)).toBe(false)
+  })
+})
+
+describe('transitionZone (4.2, DATA-MODEL §1.1)', () => {
+  it('컷 지점 중심으로 duration 구간', () => {
+    expect(transitionZone(2, 1, 0, 4)).toEqual({ start: 1.5, end: 2.5 })
+  })
+
+  it('클립 경계로 클램프된다', () => {
+    // 앞 클립이 1.8초에 시작 → 구간 시작이 클립 시작으로 클램프
+    expect(transitionZone(2, 1, 1.8, 4)).toEqual({ start: 1.8, end: 2.5 })
+    // 뒤 클립이 2.3초에 끝
+    expect(transitionZone(2, 1, 0, 2.3)).toEqual({ start: 1.5, end: 2.3 })
+  })
+
+  it('전환 타입 → 셰이더 id', () => {
+    expect(transitionTypeId('dissolve')).toBe(0)
+    expect(transitionTypeId('fade')).toBe(0)
+    expect(transitionTypeId('wipe')).toBe(1)
+    expect(transitionTypeId('slide')).toBe(2)
+  })
+})

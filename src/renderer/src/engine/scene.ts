@@ -1,15 +1,29 @@
 /**
- * 장면 빌더 — 타임라인 시각 t 의 레이어 목록을 만든다.
- * 프리뷰(poll: 논블로킹 최신 프레임)와 내보내기(accurate: 프레임 정확)가 같은 로직을 공유 → WYSIWYG.
+ * 장면 빌더 — 타임라인 시각 t 의 SceneItem(레이어/전환) 목록을 만든다.
+ * 프리뷰(poll)와 내보내기(accurate)가 같은 로직을 공유 → WYSIWYG.
+ *
+ * 전환(4.2): 인접 클립 쌍에서 앞 클립의 transitionOut 이 원본 (DATA-MODEL §1.1).
+ * 전환 구간에서는 두 클립의 프레임을 각각 확보해 전환 아이템으로 내보낸다.
+ * 핸들 부족 시 VideoSource.getFrameAt 이 소스 범위로 클램프 → 자연스러운 프레임 홀드 fallback.
  */
 import type { Clip, Project, Track } from '@shared/model/types'
-import type { Layer } from './compositor'
+import { resolveColorAdjust } from '@shared/effects-spec'
+import { transitionZone } from '@shared/effects-spec'
+import type { Layer, SceneItem } from './compositor'
 import { getImageBitmap, getVideoSource, VideoSource } from './videoSource'
 import { rasterizeText, textAnimState } from './textRaster'
 
-export function decodePath(project: Project, assetId: string): string | null {
+export type DecodePurpose = 'preview' | 'export'
+
+/**
+ * 디코딩에 사용할 파일 경로.
+ * - preview: 성능 프록시(perfProxy) > 호환 프록시 > 원본
+ * - export: 호환 프록시(WebCodecs 필수) > 원본 — 성능 프록시는 절대 사용하지 않는다 (6.2: 내보내기는 원본 품질)
+ */
+export function decodePath(project: Project, assetId: string, purpose: DecodePurpose): string | null {
   const asset = project.assets.find((a) => a.id === assetId)
   if (!asset || asset.status === 'missing') return null
+  if (purpose === 'preview') return asset.perfProxyPath ?? asset.proxyPath ?? asset.path
   return asset.proxyPath ?? asset.path
 }
 
@@ -17,15 +31,26 @@ export function clipSourceTime(clip: Clip, timelineT: number): number {
   return (clip.sourceIn ?? 0) + (timelineT - clip.timelineStart) * (clip.speed ?? 1)
 }
 
-export function activeClipsAt(project: Project, t: number): Array<{ track: Track; clip: Clip }> {
-  const result: Array<{ track: Track; clip: Clip }> = []
-  for (const track of project.tracks) {
-    if (track.hidden) continue
-    for (const clip of track.clips) {
-      if (clip.timelineStart <= t && t < clip.timelineEnd) result.push({ track, clip })
+interface TransitionAt {
+  a: Clip
+  b: Clip
+  type: string
+  progress: number
+}
+
+/** t 가 이 트랙의 전환 구간 안이면 전환 정보 반환 */
+function findTransitionAt(track: Track, t: number): TransitionAt | null {
+  const clips = [...track.clips].sort((x, y) => x.timelineStart - y.timelineStart)
+  for (let i = 0; i < clips.length - 1; i++) {
+    const a = clips[i]
+    const b = clips[i + 1]
+    if (!a.transitionOut || Math.abs(b.timelineStart - a.timelineEnd) > 1e-3) continue
+    const zone = transitionZone(a.timelineEnd, a.transitionOut.duration, a.timelineStart, b.timelineEnd)
+    if (t >= zone.start && t < zone.end && zone.end > zone.start) {
+      return { a, b, type: a.transitionOut.type, progress: (t - zone.start) / (zone.end - zone.start) }
     }
   }
-  return result
+  return null
 }
 
 function textLayer(clip: Clip, t: number): Layer | null {
@@ -39,6 +64,7 @@ function textLayer(clip: Clip, t: number): Layer | null {
     srcHeight: raster.height,
     fitToCanvas: false,
     opacity: (clip.opacity ?? 1) * anim.opacityMul,
+    adjust: resolveColorAdjust(clip.effects),
     transform: {
       x: tr.x + anim.offsetX,
       y: tr.y + anim.offsetY,
@@ -48,110 +74,133 @@ function textLayer(clip: Clip, t: number): Layer | null {
   }
 }
 
-/**
- * 프리뷰용 (논블로킹): 디코딩 완료된 최신 프레임을 사용하고 pump 로 다음 프레임을 요청.
- * 반환 순서는 아래 레이어 → 위 레이어 (tracks 배열은 위→아래이므로 역순).
- */
-export function buildLayersPoll(project: Project, t: number): Layer[] {
-  const layers: Layer[] = []
-  for (let i = project.tracks.length - 1; i >= 0; i--) {
-    const track = project.tracks[i]
-    if (track.hidden || track.kind === 'audio') continue
-    for (const clip of track.clips) {
-      if (!(clip.timelineStart <= t && t < clip.timelineEnd)) continue
-      if (clip.kind === 'text') {
-        const layer = textLayer(clip, t)
-        if (layer) layers.push(layer)
-      } else if (clip.kind === 'video' && clip.assetId) {
-        const path = decodePath(project, clip.assetId)
-        if (!path) continue
-        const srcPromise = getVideoSource(path)
-        // 이미 로드된 소스만 사용 (Promise 상태 확인용 폴링 맵)
-        const src = loadedSources.get(path)
-        if (!src) {
-          void srcPromise.then((s) => loadedSources.set(path, s)).catch(() => {})
-          continue
-        }
-        src.pump(clipSourceTime(clip, t))
-        const frame = src.displayFrame
-        if (frame) {
-          layers.push({
-            source: frame,
-            srcWidth: src.width,
-            srcHeight: src.height,
-            fitToCanvas: true,
-            opacity: clip.opacity,
-            transform: clip.transform
-          })
-        }
-      } else if (clip.kind === 'image' && clip.assetId) {
-        const path = decodePath(project, clip.assetId)
-        if (!path) continue
-        const bmp = loadedImages.get(path)
-        if (!bmp) {
-          void getImageBitmap(path)
-            .then((b) => loadedImages.set(path, b))
-            .catch(() => {})
-          continue
-        }
-        layers.push({
-          source: bmp,
-          srcWidth: bmp.width,
-          srcHeight: bmp.height,
-          fitToCanvas: true,
-          opacity: clip.opacity,
-          transform: clip.transform
-        })
-      }
-    }
+function visualLayerBase(clip: Clip): Pick<Layer, 'fitToCanvas' | 'opacity' | 'transform' | 'adjust'> {
+  return {
+    fitToCanvas: true,
+    opacity: clip.opacity,
+    transform: clip.transform,
+    adjust: resolveColorAdjust(clip.effects)
   }
-  return layers
 }
 
-/** 내보내기/시크용 (정확): 각 클립의 프레임을 await 로 확보 */
-export async function buildLayersAccurate(project: Project, t: number): Promise<Layer[]> {
-  const layers: Layer[] = []
+/** 같은 자산의 두 구간이 전환에서 동시에 필요할 수 있어 역할별 인스턴스 키를 지원 */
+function pollVideoLayer(project: Project, clip: Clip, t: number, instanceKey?: string): Layer | null {
+  if (!clip.assetId) return null
+  const path = decodePath(project, clip.assetId, 'preview')
+  if (!path) return null
+  const src = loadedSources.get(cacheKey(path, instanceKey))
+  if (!src) {
+    void getVideoSource(path, instanceKey)
+      .then((s) => loadedSources.set(cacheKey(path, instanceKey), s))
+      .catch(() => {})
+    return null
+  }
+  src.pump(clipSourceTime(clip, t))
+  const frame = src.displayFrame
+  if (!frame) return null
+  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip) }
+}
+
+function pollImageLayer(project: Project, clip: Clip): Layer | null {
+  if (!clip.assetId) return null
+  const path = decodePath(project, clip.assetId, 'preview')
+  if (!path) return null
+  const bmp = loadedImages.get(path)
+  if (!bmp) {
+    void getImageBitmap(path)
+      .then((b) => loadedImages.set(path, b))
+      .catch(() => {})
+    return null
+  }
+  return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip) }
+}
+
+function pollClipLayer(project: Project, clip: Clip, t: number, instanceKey?: string): Layer | null {
+  if (clip.kind === 'text') return textLayer(clip, t)
+  if (clip.kind === 'video') return pollVideoLayer(project, clip, t, instanceKey)
+  if (clip.kind === 'image') return pollImageLayer(project, clip)
+  return null
+}
+
+async function accurateClipLayer(
+  project: Project,
+  clip: Clip,
+  t: number,
+  purpose: DecodePurpose,
+  instanceKey?: string
+): Promise<Layer | null> {
+  if (clip.kind === 'text') return textLayer(clip, t)
+  if (!clip.assetId) return null
+  const path = decodePath(project, clip.assetId, purpose)
+  if (!path) return null
+  if (clip.kind === 'image') {
+    const bmp = await getImageBitmap(path)
+    loadedImages.set(path, bmp)
+    return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip) }
+  }
+  const src = await getVideoSource(path, instanceKey)
+  loadedSources.set(cacheKey(path, instanceKey), src)
+  const frame = await src.getFrameAt(clipSourceTime(clip, t))
+  if (!frame) return null
+  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip) }
+}
+
+/** 프리뷰용 (논블로킹). 반환 순서는 아래→위 레이어 (tracks 배열은 위→아래이므로 역순). */
+export function buildScenePoll(project: Project, t: number): SceneItem[] {
+  const items: SceneItem[] = []
   for (let i = project.tracks.length - 1; i >= 0; i--) {
     const track = project.tracks[i]
     if (track.hidden || track.kind === 'audio') continue
+
+    const transition = track.kind === 'video' ? findTransitionAt(track, t) : null
+    if (transition) {
+      items.push({
+        kind: 'transition',
+        a: pollClipLayer(project, transition.a, t),
+        b: pollClipLayer(project, transition.b, t, 'trans-b'),
+        type: transition.type,
+        progress: transition.progress
+      })
+      continue
+    }
     for (const clip of track.clips) {
       if (!(clip.timelineStart <= t && t < clip.timelineEnd)) continue
-      if (clip.kind === 'text') {
-        const layer = textLayer(clip, t)
-        if (layer) layers.push(layer)
-      } else if (clip.kind === 'video' && clip.assetId) {
-        const path = decodePath(project, clip.assetId)
-        if (!path) continue
-        const src = await getVideoSource(path)
-        loadedSources.set(path, src)
-        const frame = await src.getFrameAt(clipSourceTime(clip, t))
-        if (frame) {
-          layers.push({
-            source: frame,
-            srcWidth: src.width,
-            srcHeight: src.height,
-            fitToCanvas: true,
-            opacity: clip.opacity,
-            transform: clip.transform
-          })
-        }
-      } else if (clip.kind === 'image' && clip.assetId) {
-        const path = decodePath(project, clip.assetId)
-        if (!path) continue
-        const bmp = await getImageBitmap(path)
-        loadedImages.set(path, bmp)
-        layers.push({
-          source: bmp,
-          srcWidth: bmp.width,
-          srcHeight: bmp.height,
-          fitToCanvas: true,
-          opacity: clip.opacity,
-          transform: clip.transform
-        })
-      }
+      const layer = pollClipLayer(project, clip, t)
+      if (layer) items.push({ kind: 'layer', layer })
     }
   }
-  return layers
+  return items
+}
+
+/** 내보내기/시크용 (프레임 정확) */
+export async function buildSceneAccurate(project: Project, t: number, purpose: DecodePurpose): Promise<SceneItem[]> {
+  const items: SceneItem[] = []
+  for (let i = project.tracks.length - 1; i >= 0; i--) {
+    const track = project.tracks[i]
+    if (track.hidden || track.kind === 'audio') continue
+
+    const transition = track.kind === 'video' ? findTransitionAt(track, t) : null
+    if (transition) {
+      items.push({
+        kind: 'transition',
+        a: await accurateClipLayer(project, transition.a, t, purpose),
+        b: await accurateClipLayer(project, transition.b, t, purpose, 'trans-b'),
+        type: transition.type,
+        progress: transition.progress
+      })
+      continue
+    }
+    for (const clip of track.clips) {
+      if (!(clip.timelineStart <= t && t < clip.timelineEnd)) continue
+      const layer = await accurateClipLayer(project, clip, t, purpose)
+      if (layer) items.push({ kind: 'layer', layer })
+    }
+  }
+  return items
+}
+
+function cacheKey(path: string, instanceKey?: string): string {
+  return instanceKey ? `${path}|${instanceKey}` : path
 }
 
 const loadedSources = new Map<string, VideoSource>()
