@@ -57,6 +57,9 @@ export interface EditorApi {
   /** e2e 테스트 환경 여부 (E2E=1) — 테스트 훅 주입/복구 프롬프트 분기 */
   isE2E: boolean
 
+  /** OS 설치 폰트 family 목록 (자막 폰트 선택용, 3.1) */
+  listFonts(): Promise<string[]>
+
   openVideoDialog(): Promise<string[]>
   probe(path: string): Promise<ProbeResult>
   /** 호환 프록시(H.264 CFR) 생성 — progress 콜백은 onProxyProgress 이벤트로 */

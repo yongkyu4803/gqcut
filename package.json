@@ -24,6 +24,7 @@
     "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
+    "font-list": "^2.1.0",
     "mp4box": "^0.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

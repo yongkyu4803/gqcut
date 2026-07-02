@@ -9,6 +9,8 @@ const api: EditorApi = {
   platform: process.platform,
   isE2E: process.env.E2E === '1',
 
+  listFonts: () => ipcRenderer.invoke('app:listFonts'),
+
   openVideoDialog: () => ipcRenderer.invoke('media:openDialog'),
   probe: (path) => ipcRenderer.invoke('media:probe', path),
   makeProxy: (path, jobId) => ipcRenderer.invoke('media:makeProxy', path, jobId),

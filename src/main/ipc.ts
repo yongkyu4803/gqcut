@@ -4,6 +4,7 @@
  */
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
+import { getFonts } from 'font-list'
 import { probeMedia } from './ffmpeg/probe'
 import { extractAudioWav, makeCompatProxy, makePerfProxy } from './ffmpeg/proxy'
 import { checkAutosave, clearAutosave, openProjectFrom, saveProjectTo, writeAutosave } from './project'
@@ -12,6 +13,15 @@ import type { ExportStartOptions } from '../shared/ipc-types'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('app:ping', () => 'pong')
+
+  // 자막 폰트 선택(3.1) — OS 에 설치된 폰트 목록(family 명, 공백 포함 시 따옴표로 이미 감싸져 있어 CSS font 문자열에 그대로 사용 가능)
+  ipcMain.handle('app:listFonts', async () => {
+    try {
+      return await getFonts()
+    } catch {
+      return []
+    }
+  })
 
   ipcMain.handle('media:openDialog', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)

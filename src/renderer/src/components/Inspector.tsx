@@ -2,10 +2,12 @@
  * 인스펙터 — 선택 클립 속성 편집: 볼륨/페이드(2.2), 변형/불투명도, 텍스트 스타일·애니메이션(3.1),
  * 색보정 필터(4.1), 클립 간 전환(4.2)
  */
+import { useEffect, useState } from 'react'
 import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { useEditor } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
+import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -204,6 +206,18 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
   void clip
   const setText = (label: string, patch: Partial<TextContent>): void => onSet(label, { text: { ...text, ...patch } })
 
+  // 시스템 폰트 목록(메인 프로세스 IPC 조회) — 실패 시 범용 웹세이프 폰트로 폴백
+  const [fonts, setFonts] = useState<string[]>(GENERIC_FONT_FALLBACK)
+  useEffect(() => {
+    let alive = true
+    void listSystemFonts().then((list) => {
+      if (alive && list.length > 0) setFonts(list)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const animRow = (which: 'animationIn' | 'animationOut', label: string): React.JSX.Element => {
     const anim = text[which]
     return (
@@ -238,6 +252,16 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
     <>
       <h4>텍스트</h4>
       <textarea className="text-input" data-testid="text-value" value={text.value} rows={2} onChange={(e) => setText('텍스트 내용', { value: e.target.value })} />
+      <Row label="폰트">
+        <select data-testid="text-font" value={text.fontFamily} onChange={(e) => setText('폰트', { fontFamily: e.target.value })}>
+          {!fonts.includes(text.fontFamily) && <option value={text.fontFamily}>{displayFontName(text.fontFamily)}</option>}
+          {fonts.map((f) => (
+            <option key={f} value={f}>
+              {displayFontName(f)}
+            </option>
+          ))}
+        </select>
+      </Row>
       <Row label="크기(px)">
         <input type="number" min={8} value={text.fontSize} onChange={(e) => setText('폰트 크기', { fontSize: Math.max(8, Number(e.target.value)) })} />
       </Row>
