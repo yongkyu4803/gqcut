@@ -15,15 +15,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # npm ci 가 electron postinstall(바이너리 다운로드)을 건너뛰는 경우 대비 — 멱등
-      - name: Electron 바이너리 보장 (+진단)
+      # npm ci 의 electron postinstall 이 dist 만 만들고 path.txt 를 못 쓰는 반쯤 깨진 상태가 되면
+      # install.js 가 설치됐다고 오판한다 → 지우고 강제 재설치 후 실행 검증
+      - name: Electron 바이너리 보장
         run: |
-          env | grep -iE "electron|npm_config" || true
-          ls node_modules/electron/ || true
-          cat node_modules/electron/path.txt 2>/dev/null || echo "(path.txt 없음)"
-          node node_modules/electron/install.js
-          cat node_modules/electron/path.txt
-          npx electron --version
+          if ! npx electron --version 2>/dev/null; then
+            rm -rf node_modules/electron/dist node_modules/electron/path.txt
+            node node_modules/electron/install.js
+            npx electron --version
+          fi
       - run: npm run plan:validate
       - run: npm run typecheck
       - run: npm run test
