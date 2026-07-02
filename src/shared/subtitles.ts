@@ -92,10 +92,17 @@ export const STT_MODEL_INFO: Record<SttModel, { repo: string; label: string; app
   'whisper-small': { repo: 'onnx-community/whisper-small', label: '정확 (small)', approxMB: 260 }
 }
 
+/**
+ * 언어 목록 — 한국어가 기본(첫 항목).
+ * 주의: Whisper 는 언어 미지정('auto')이면 짧은 클립에서 영어로 번역/전사되는 경향이 있어
+ * 한국 콘텐츠 기본값은 반드시 'korean' 이어야 한다 (실측 확인).
+ */
 export const STT_LANGUAGES: Array<{ value: string; label: string }> = [
-  { value: 'auto', label: '자동 감지' },
   { value: 'korean', label: '한국어' },
   { value: 'english', label: '영어' },
   { value: 'japanese', label: '일본어' },
-  { value: 'chinese', label: '중국어' }
+  { value: 'chinese', label: '중국어' },
+  { value: 'auto', label: '자동 감지' }
 ]
+
+export const DEFAULT_STT_LANGUAGE = 'korean'

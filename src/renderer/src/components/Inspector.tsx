@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
-import { STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
+import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { useEditor } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
@@ -114,7 +114,7 @@ function CaptionPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
   const sttActive = useEditor((s) => !!s.sttProgress?.active)
   const asset = clip.assetId ? project.assets.find((a) => a.id === clip.assetId) : undefined
   const [model, setModel] = useState<SttModel>('whisper-base')
-  const [language, setLanguage] = useState('auto')
+  const [language, setLanguage] = useState(DEFAULT_STT_LANGUAGE)
   if (!asset?.hasAudio) return null
 
   const run = async (): Promise<void> => {

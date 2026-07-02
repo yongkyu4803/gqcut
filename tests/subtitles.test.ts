@@ -2,7 +2,15 @@
  * 자동 자막 순수 로직 유닛 테스트 (3.2) — 시간 변환/클램프/SRT.
  */
 import { describe, expect, it } from 'vitest'
-import { formatSrtTimestamp, placementsToSrt, segmentsToPlacements, type SttSegment } from '@shared/subtitles'
+import { DEFAULT_STT_LANGUAGE, formatSrtTimestamp, placementsToSrt, segmentsToPlacements, STT_LANGUAGES, type SttSegment } from '@shared/subtitles'
+
+describe('STT 기본 언어 (회귀 방지)', () => {
+  // Whisper 는 auto 이면 한국어를 영어로 번역해버림 → 한국 콘텐츠 기본은 반드시 korean
+  it('기본 언어는 korean, 목록 첫 항목도 korean', () => {
+    expect(DEFAULT_STT_LANGUAGE).toBe('korean')
+    expect(STT_LANGUAGES[0].value).toBe('korean')
+  })
+})
 
 describe('segmentsToPlacements — 소스→타임라인 변환 (3.2.3)', () => {
   const segs: SttSegment[] = [
