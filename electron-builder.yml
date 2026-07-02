@@ -31,8 +31,8 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 
-# 자동 업데이트 게시 채널 (6.3.3) — GitHub Releases. repo 생성 후 owner/repo 수정.
+# 자동 업데이트 게시 채널 (6.3.3) — GitHub Releases
 publish:
   provider: github
-  owner: vessl-ai
+  owner: yongkyu4803
   repo: gqcut
