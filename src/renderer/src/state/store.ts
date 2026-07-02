@@ -28,6 +28,7 @@ export interface EditorState {
   proxyJobs: Record<string, number> // assetId -> percent
   projectPath: string | null // 현재 프로젝트 파일 경로 (6.1)
   savedRevision: number // 마지막 저장 시점의 히스토리 길이 (더티 판정)
+  sttProgress: { active: boolean; phase: string; percent: number; cancel?: () => void } | null // 자동 자막 (3.2)
 
   dispatch(label: string, fn: (p: Project) => Project): void
   undo(): void
@@ -42,6 +43,7 @@ export interface EditorState {
   setProxyProgress(assetId: string, percent: number | null): void
   setProjectPath(path: string | null): void
   markSaved(): void
+  setSttProgress(p: EditorState['sttProgress']): void
 }
 
 const MAX_HISTORY = 200
@@ -59,6 +61,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   proxyJobs: {},
   projectPath: null,
   savedRevision: 0,
+  sttProgress: null,
 
   dispatch(label, fn) {
     const before = get().project
@@ -103,7 +106,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { proxyJobs: jobs }
     }),
   setProjectPath: (path) => set({ projectPath: path }),
-  markSaved: () => set((s) => ({ savedRevision: s.past.length }))
+  markSaved: () => set((s) => ({ savedRevision: s.past.length })),
+  setSttProgress: (p) => set({ sttProgress: p })
 }))
 
 /** 프로젝트 직렬화 (1.1.4) */

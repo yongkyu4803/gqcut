@@ -15,6 +15,7 @@ let clipboard: Clip | null = null
 
 export default function App(): React.JSX.Element {
   const exportProgress = useEditor((s) => s.exportProgress)
+  const sttProgress = useEditor((s) => s.sttProgress)
 
   // 전역 단축키 (1.2.6)
   useEffect(() => {
@@ -124,6 +125,21 @@ export default function App(): React.JSX.Element {
             </div>
             <span>{Math.round(exportProgress.percent)}%</span>
             <button className="btn" onClick={() => exportProgress.cancel?.()}>
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sttProgress?.active && (
+        <div className="export-overlay" data-testid="stt-overlay">
+          <div className="export-dialog">
+            <h3>자동 자막</h3>
+            <span>{sttProgress.phase}</span>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${sttProgress.percent}%` }} />
+            </div>
+            <button className="btn" onClick={() => sttProgress.cancel?.()}>
               취소
             </button>
           </div>

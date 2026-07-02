@@ -4,12 +4,15 @@
  */
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { getFonts } from 'font-list'
 import { probeMedia } from './ffmpeg/probe'
 import { extractAudioWav, makeCompatProxy, makePerfProxy } from './ffmpeg/proxy'
 import { checkAutosave, clearAutosave, openProjectFrom, saveProjectTo, writeAutosave } from './project'
 import { audioDone, cancelExport, finishExport, startExport, writeAudioChunk, writeFrame } from './export'
-import type { ExportStartOptions } from '../shared/ipc-types'
+import { cancelTranscribe, transcribe } from './stt'
+import type { ExportStartOptions, SttTranscribeOptions } from '../shared/ipc-types'
+import type { SttModel } from '../shared/subtitles'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('app:ping', () => 'pong')
@@ -112,4 +115,33 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('export:frame', (_e, jobId: string, frame: ArrayBuffer) => writeFrame(jobId, frame))
   ipcMain.handle('export:finish', (_e, jobId: string) => finishExport(jobId))
   ipcMain.handle('export:cancel', (_e, jobId: string) => cancelExport(jobId))
+
+  // 자동 자막 (3.2)
+  ipcMain.handle('stt:transcribe', async (e, opts: SttTranscribeOptions) => {
+    const sender = e.sender
+    try {
+      const segments = await transcribe(
+        { ...opts, model: opts.model as SttModel },
+        (p) => {
+          if (!sender.isDestroyed()) sender.send('stt:progress', { jobId: opts.jobId, ...p })
+        }
+      )
+      return { ok: true, segments }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: msg }
+    }
+  })
+  ipcMain.handle('stt:cancel', (_e, jobId: string) => cancelTranscribe(jobId))
+
+  ipcMain.handle('export:saveSrt', async (e, defaultName: string, content: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const result = await dialog.showSaveDialog(win!, {
+      defaultPath: defaultName,
+      filters: [{ name: '자막', extensions: ['srt'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(result.filePath, content, 'utf8')
+    return result.filePath
+  })
 }

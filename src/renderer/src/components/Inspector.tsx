@@ -5,9 +5,11 @@
 import { useEffect, useState } from 'react'
 import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
+import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { useEditor } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
+import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -100,8 +102,62 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {clip.kind === 'video' && <CaptionPanel clip={clip} />}
+
       {clip.kind === 'text' && clip.text && <TextPanel clip={clip} text={clip.text} onSet={set} />}
     </div>
+  )
+}
+
+/** 자동 자막 (3.2) — 선택 비디오 클립의 음성을 Whisper 로 전사해 자막 트랙에 배치 */
+function CaptionPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
+  const project = useEditor((s) => s.project)
+  const sttActive = useEditor((s) => !!s.sttProgress?.active)
+  const asset = clip.assetId ? project.assets.find((a) => a.id === clip.assetId) : undefined
+  const [model, setModel] = useState<SttModel>('whisper-base')
+  const [language, setLanguage] = useState(DEFAULT_STT_LANGUAGE)
+  if (!asset?.hasAudio) return null
+
+  const run = async (): Promise<void> => {
+    try {
+      const n = await generateCaptions(clip.id, { model, language })
+      if (n === 0) alert('인식된 음성이 없습니다')
+    } catch (e) {
+      alert(`자막 생성 실패: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  return (
+    <>
+      <h4>자동 자막</h4>
+      <Row label="모델">
+        <select value={model} onChange={(e) => setModel(e.target.value as SttModel)}>
+          {(Object.keys(STT_MODEL_INFO) as SttModel[]).map((m) => (
+            <option key={m} value={m}>
+              {STT_MODEL_INFO[m].label} · {STT_MODEL_INFO[m].approxMB}MB
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label="언어">
+        <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+          {STT_LANGUAGES.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <button className="btn small" data-testid="gen-captions-btn" disabled={sttActive} onClick={() => void run()} style={{ width: '100%', marginTop: 4 }}>
+        ✦ 자막 생성
+      </button>
+      <button className="btn small" onClick={() => void exportSubtitlesSrt()} style={{ width: '100%', marginTop: 4 }}>
+        SRT 내보내기
+      </button>
+      <p className="hint" style={{ fontSize: 10, textAlign: 'left' }}>
+        첫 실행 시 모델({STT_MODEL_INFO[model].approxMB}MB)을 한 번 내려받습니다. 오프라인 처리.
+      </p>
+    </>
   )
 }
 

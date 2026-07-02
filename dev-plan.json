@@ -17,7 +17,7 @@
     "corePrinciple": "프리뷰 엔진(WebCodecs+WebGL, 실시간)과 내보내기 엔진(FFmpeg, 오프라인)을 분리하되, 이펙트/합성 결과는 양쪽이 동일해야 한다(WYSIWYG). WYSIWYG 판정은 정성 비교가 아니라 수치 기준(기준 프레임 SSIM)으로 한다.",
     "revisionNotes": "v0.2.0 (2026-07-02): (1) WebGL 컴포지터를 Phase 4에서 Phase 1.3으로 전진(Canvas2D→WebGL 재작업 제거), (2) 내보내기 파이프라인 스파이크를 Phase 1.5로 전진(WYSIWYG 구조 리스크 조기 검증), (3) 최소 오디오 재생을 1.4(A/V 싱크)에 포함(Phase 2 의존성 역전 해소), (4) 코덱 호환성 fallback을 Phase 0.4로 승격 + VFR 감지를 0.2에 추가, (5) 품질 기준 수치화(SSIM/내보내기 속도), (6) 초기 내보내기 프리셋 H.264+AAC 한정, (7) e2e 스모크(1.6)와 CI 게이트(0.1.6) 추가.",
     "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다.",
-    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토."
+    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토. | 자동 자막(3.2) 구현 (2026-07-03): 엔진은 계획의 whisper.cpp 대신 @huggingface/transformers(Whisper ONNX)+onnxruntime-node 로 확정 — Electron main 에서 N-API 로 로드됨을 실측(base 한국어 정확 전사). 클립 소스구간 16kHz 추출→ASR(타임스탬프)→소스/타임라인 변환→자막 트랙 일괄 배치(단일 undo)→SRT 내보내기. 유닛 46개(자막 순수로직 9), 실제 앱에서 음성영상→자막2개 생성·프리뷰 렌더 확인. e2e/stt.spec.ts 는 RUN_STT_E2E 로 gated(모델 다운로드 무거움). 미검증: 다양한 음성/장편 정확도(육안), 패키징 후 onnxruntime asar 언팩 동작."
   },
   "techStack": {
     "shell": "Electron",
@@ -30,7 +30,8 @@
     "exportRenderHost": "확정(1.5 스파이크) — 보이는 렌더러의 OffscreenCanvas. 실측 1080p30 파이프 497MB/s, 2.0x 실시간. 미달 시 YUV 전송/숨김 창 재검토",
     "audioMixdown": "확정(5.1) — OfflineAudioContext: 프리뷰와 동일 오디오 그래프를 오프라인 렌더 (오디오 WYSIWYG)",
     "bundler": "Vite",
-    "testing": "Vitest (unit) + Playwright (e2e)"
+    "testing": "Vitest (unit) + Playwright (e2e)",
+    "stt": "Transformers.js(Whisper ONNX) + onnxruntime-node, 메인 프로세스 (whisper.cpp 대안 — 순수 npm/N-API 로 크로스플랫폼 견고)"
   },
   "progressLegend": {
     "done": "checklist 항목 완료 여부 (true/false)",
@@ -669,43 +670,47 @@
         },
         {
           "id": "3.2",
-          "name": "(선택) 자동 자막(STT)",
-          "description": "음성 인식으로 자막을 자동 생성한다.",
-          "status": "not_started",
+          "name": "(선택) 자동 자막(STT) — whisper.cpp 로컬",
+          "description": "타임라인 영상에서 음성을 인식해 자막 텍스트 클립을 자동 생성한다. 엔진 확정(실측): @huggingface/transformers(Whisper ONNX) + onnxruntime-node — 순수 npm, N-API 라 Electron ABI 문제 없이 메인 프로세스에서 로드(검증 완료). whisper.cpp 대비 크로스플랫폼 배포가 견고. 오프라인/무료/프라이버시 유지. 기본 base(q8, ~90MB) 첫 사용 시 userData/stt-cache 로 다운로드.",
+          "status": "verifying",
           "optional": true,
           "checklist": [
             {
               "id": "3.2.1",
-              "task": "STT 엔진 선택(Whisper 로컬 or API)",
-              "done": false
+              "task": "엔진 확정: Transformers.js Whisper + onnxruntime-node (Electron main 로드/전사 실측). 모델 캐시(userData/stt-cache), tiny/base/small 선택",
+              "done": true
             },
             {
               "id": "3.2.2",
-              "task": "오디오 추출 -> STT -> 타임코드 있는 자막 생성",
-              "done": false
+              "task": "메인: 클립 소스 구간 16kHz mono f32 추출 → Whisper ASR(타임스탬프) → 세그먼트 + IPC 진행률(추출/다운로드/전사)/취소",
+              "done": true
             },
             {
               "id": "3.2.3",
-              "task": "생성된 자막을 텍스트 클립으로 자동 배치",
-              "done": false
+              "task": "렌더러: 소스→타임라인 변환(speed/트림, 경계·겹침 클램프) → 자막 트랙 일괄 배치(단일 undo), 하단 중앙 기본 스타일",
+              "done": true
             },
             {
               "id": "3.2.4",
-              "task": "자막 편집/재정렬 UI",
-              "done": false
+              "task": "편집 UX: 인스펙터 자동 자막 패널(모델/언어) + 개별 수정 + SRT 내보내기",
+              "done": true
             }
           ],
           "verification": {
             "loop": [
-              "말소리 영상에서 자동 자막을 생성",
-              "자막 텍스트 정확도와 타임코드 싱크를 확인",
-              "생성된 자막을 편집/삭제할 수 있는지 확인"
+              "macOS say 명령으로 고정 문구 음성 픽스처 생성(mp4 mux) — CI 재현 가능",
+              "해당 클립에서 자동 자막 실행 → 진행률 표시/취소 동작 확인",
+              "생성된 자막 텍스트가 문구와 대체로 일치하고 타임코드가 발화 구간 안에 있는지 확인",
+              "트림/배속 클립에서 자막 위치가 타임라인 시간으로 정확히 변환되는지 확인",
+              "생성 후 인스펙터에서 텍스트 수정/삭제 + undo 1회로 전체 롤백 확인"
             ],
             "successCriteria": [
-              "자막이 음성과 대체로 일치하고 타임코드가 맞는다",
-              "생성 후 편집이 가능하다"
+              "고정 문구 픽스처에서 세그먼트가 1개 이상 생성되고 타임코드가 발화 구간과 일치한다",
+              "트림/배속 반영 시간 변환이 정확하다 (유닛 테스트)",
+              "모델 미보유 시 다운로드 UX(진행률/재시도)가 동작한다",
+              "생성 결과가 단일 undo 로 롤백된다"
             ],
-            "onFailure": "긴 오디오는 청크 분할 처리, 타임코드 오프셋 보정"
+            "onFailure": "onnxruntime-node 로드 실패 시 asarUnpack(node_modules/onnxruntime-node) 확인. 한국어 정확도 미달 시 모델 small 로 상향. 긴 오디오는 chunk_length_s=30/stride=5 로 처리. 패키징 후 미동작 시 @huggingface asar 언팩 확인."
           }
         }
       ]

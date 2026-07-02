@@ -252,6 +252,24 @@ export function addClipOverlay(p: Project, clip: Clip, newTrack: Track): Project
   return addClip(withTrack, newTrack.id, clip)
 }
 
+/**
+ * 자막 일괄 배치 (3.2.3) — placements 를 담을 텍스트 트랙에 한 번에 넣는다(단일 undo).
+ * 시간대가 비는 기존 텍스트 트랙이 있으면 재사용, 없으면 최상단에 새 트랙 생성.
+ * (트랙 생성이 이 커맨드 안에서 일어나 undo 1회로 트랙+클립이 함께 롤백)
+ */
+export function addSubtitleClips(p: Project, clips: Clip[], newTrack: Track): Project {
+  if (clips.length === 0) return p
+  const sorted = sortClips(clips)
+  const overlaps = (track: Track): boolean =>
+    sorted.some((c) => track.clips.some((e) => c.timelineStart < e.timelineEnd && c.timelineEnd > e.timelineStart))
+
+  const reusable = p.tracks.find((t) => t.kind === 'text' && !overlaps(t))
+  if (reusable) {
+    return mapTrack(p, reusable.id, (t) => ({ ...t, clips: sortClips([...t.clips, ...sorted]) }))
+  }
+  return touch({ ...p, tracks: [{ ...newTrack, clips: sorted }, ...p.tracks] })
+}
+
 export function updateSettings(p: Project, patch: Partial<Project['settings']>): Project {
   return touch({ ...p, settings: { ...p.settings, ...patch } })
 }

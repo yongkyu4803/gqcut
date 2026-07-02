@@ -2,6 +2,31 @@
  * 메인 ↔ 렌더러 IPC 계약 (타입 안전 채널).
  * preload 가 이 시그니처대로 contextBridge 에 노출한다.
  */
+import type { SttSegment } from './subtitles'
+
+export interface SttTranscribeOptions {
+  jobId: string
+  sourcePath: string
+  sourceIn: number
+  sourceOut: number
+  speed?: number
+  /** 'whisper-tiny' | 'whisper-base' | 'whisper-small' */
+  model: string
+  /** 'auto' | 'korean' | ... */
+  language: string
+}
+
+export interface SttProgressEvent {
+  jobId: string
+  phase: 'extract' | 'download' | 'transcribe' | 'done'
+  percent: number
+}
+
+export interface SttResult {
+  ok: boolean
+  segments?: SttSegment[]
+  error?: string
+}
 
 export interface ProbeResult {
   path: string
@@ -85,6 +110,13 @@ export interface EditorApi {
   exportFinish(jobId: string): Promise<ExportResult>
   exportCancel(jobId: string): Promise<void>
   saveFileDialog(defaultName: string): Promise<string | null>
+
+  /** 자동 자막(STT, 3.2): 클립 소스 구간 전사 → 세그먼트. 진행률은 onSttProgress */
+  sttTranscribe(opts: SttTranscribeOptions): Promise<SttResult>
+  sttCancel(jobId: string): Promise<void>
+  onSttProgress(cb: (p: SttProgressEvent) => void): () => void
+  /** SRT 파일 저장 다이얼로그 */
+  saveSrtDialog(defaultName: string, content: string): Promise<string | null>
 
   /** e2e 전용: 파일 경로 직접 임포트 (다이얼로그 우회) */
   fileExists(path: string): Promise<boolean>

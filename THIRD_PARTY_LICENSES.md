@@ -19,6 +19,9 @@
 | Zustand | MIT |
 | mp4box.js | BSD-3-Clause |
 | electron-updater | MIT |
+| @huggingface/transformers (자동 자막) | Apache-2.0 |
+| onnxruntime-node (자동 자막 추론) | MIT |
+| Whisper 모델 (onnx-community/whisper-*) | 모델 가중치 MIT (OpenAI Whisper) — 첫 사용 시 다운로드, 앱에 미번들 |
 
 ## ⚠ 라이선스 리스크 — 상용 배포 전 결정 필요
 

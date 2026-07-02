@@ -9,6 +9,8 @@ import { addClip, addClipOverlay, splitClip, updateClip } from './state/commands
 import { importFile } from './media/import'
 import { playback } from './engine/playback'
 import { captureReferenceFrame, exportTimeline, DEFAULT_EXPORT_SETTINGS } from './engine/exporter'
+import { generateCaptions } from './stt/autoCaption'
+import type { SttModel } from '@shared/subtitles'
 
 export function installTestHooks(): void {
   window.__test = {
@@ -78,6 +80,13 @@ export function installTestHooks(): void {
       if (!s.selectedClipId) return
       const id = s.selectedClipId
       s.dispatch('클립 속성(e2e)', (p) => updateClip(p, id, patch))
+    },
+
+    /** 자동 자막 생성(3.2) — 선택된 비디오 클립에서. 생성된 자막 수 반환 */
+    generateCaptions(model: string, language: string): Promise<number> {
+      const id = useEditor.getState().selectedClipId
+      if (!id) return Promise.resolve(0)
+      return generateCaptions(id, { model: model as SttModel, language })
     },
 
     async exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }> {
