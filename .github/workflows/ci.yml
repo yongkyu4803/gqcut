@@ -15,15 +15,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # npm ci 의 electron postinstall 이 dist 만 만들고 path.txt 를 못 쓰는 반쯤 깨진 상태가 되면
-      # install.js 가 설치됐다고 오판한다 → 지우고 강제 재설치 후 실행 검증
+      # npm ci 의 electron postinstall 이 CI 에서 바이너리를 남기지 않는 문제 → 강제 재설치 (+DEBUG 진단)
       - name: Electron 바이너리 보장
         run: |
-          if ! npx electron --version 2>/dev/null; then
-            rm -rf node_modules/electron/dist node_modules/electron/path.txt
-            node node_modules/electron/install.js
-            npx electron --version
-          fi
+          echo "SKIP_BINARY=[$ELECTRON_SKIP_BINARY_DOWNLOAD]"
+          rm -rf node_modules/electron/dist node_modules/electron/path.txt
+          DEBUG='@electron/get:*' node node_modules/electron/install.js
+          echo "install.js exit: $?"
+          ls node_modules/electron/dist/ 2>/dev/null | head -3 || echo "(dist 없음)"
+          npx electron --version
       - run: npm run plan:validate
       - run: npm run typecheck
       - run: npm run test
