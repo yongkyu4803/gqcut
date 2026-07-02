@@ -15,6 +15,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # npm ci 가 electron postinstall(바이너리 다운로드)을 건너뛰는 경우 대비 — 멱등
+      - run: node node_modules/electron/install.js
       - run: npm run plan:validate
       - run: npm run typecheck
       - run: npm run test
