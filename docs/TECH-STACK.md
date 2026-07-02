@@ -79,7 +79,7 @@
 - (신규 결정) 색공간: Chromium 이 BT.601 태그를 무시하므로 **모든 소스를 BT.709 로 정규화** (ARCHITECTURE §6.3)
 
 남은 미정:
-- 자동 자막(STT) 엔진: Whisper 로컬 vs 클라우드 API — 비용/프라이버시/정확도 트레이드오프 (Phase 3.2, optional)
+- ~~자동 자막(STT) 엔진~~ → **whisper.cpp 로컬** 권장 확정 (MIT, 오프라인/무료/프라이버시 — ffmpeg 자식 프로세스 패턴 재사용, 모델 small 온디맨드 다운로드). 클라우드 API 는 로컬 정확도 불만 시 재검토 (Phase 3.2, optional — 상세 계획은 dev-plan 3.2)
 - H.265 인코딩 프리셋 도입 여부(특허 라이선스 검토) — 미도입 유지 권장
 - **FFmpeg GPL 리스크**: ffmpeg-static 은 libx264 포함 GPL 빌드 — 상용 배포 전
   LGPL 커스텀 빌드 + 하드웨어 인코더(videotoolbox/mediafoundation) 전환 검토 필수.
