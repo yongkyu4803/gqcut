@@ -72,6 +72,14 @@ export function installTestHooks(): void {
       return captureReferenceFrame(useEditor.getState().project, t)
     },
 
+    /** 선택 클립 속성 패치 (페이드/볼륨 등 검증용) */
+    setSelectedClip(patch: Record<string, unknown>): void {
+      const s = useEditor.getState()
+      if (!s.selectedClipId) return
+      const id = s.selectedClipId
+      s.dispatch('클립 속성(e2e)', (p) => updateClip(p, id, patch))
+    },
+
     async exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }> {
       const handle = exportTimeline(useEditor.getState().project, path, DEFAULT_EXPORT_SETTINGS, () => {})
       const result = await handle.promise

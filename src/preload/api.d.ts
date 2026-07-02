@@ -13,6 +13,7 @@ declare global {
       applyFilter(type: string, value: number): void
       applyTransition(type: string, duration: number): void
       captureFrame(t: number): Promise<string>
+      setSelectedClip(patch: Record<string, unknown>): void
       exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }>
     }
   }

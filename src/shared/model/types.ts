@@ -77,7 +77,7 @@ export interface Clip {
   transitionOut?: Transition
 
   volume?: number // 0~1
-  fadeIn?: number // 초
+  fadeIn?: number // 초 — 시각(불투명도)과 오디오(게인)에 함께 적용 (effects-spec fadeOpacityMul)
   fadeOut?: number
 
   text?: TextContent

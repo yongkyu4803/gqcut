@@ -2,7 +2,7 @@
  * effects-spec 유닛 테스트 (4.1/4.2) — 파라미터 해석과 전환 시간 의미론.
  */
 import { describe, expect, it } from 'vitest'
-import { isNeutral, NEUTRAL_ADJUST, resolveColorAdjust, transitionTypeId, transitionZone } from '@shared/effects-spec'
+import { fadeOpacityMul, isNeutral, NEUTRAL_ADJUST, resolveColorAdjust, transitionTypeId, transitionZone } from '@shared/effects-spec'
 
 describe('resolveColorAdjust (4.1)', () => {
   it('빈/미지정 effects 는 중립값', () => {
@@ -25,6 +25,31 @@ describe('resolveColorAdjust (4.1)', () => {
     ])
     expect(a).toEqual({ brightness: 0.2, contrast: 1.3, saturation: 0.5, temperature: -0.4 })
     expect(isNeutral(a)).toBe(false)
+  })
+})
+
+describe('fadeOpacityMul (페이드 = 화면·소리 공통 수식)', () => {
+  it('페이드 없으면 항상 1', () => {
+    expect(fadeOpacityMul(undefined, undefined, 0, 4)).toBe(1)
+    expect(fadeOpacityMul(0, 0, 2, 4)).toBe(1)
+  })
+
+  it('페이드 인: 0→1 선형', () => {
+    expect(fadeOpacityMul(2, undefined, 0, 4)).toBe(0)
+    expect(fadeOpacityMul(2, undefined, 1, 4)).toBeCloseTo(0.5)
+    expect(fadeOpacityMul(2, undefined, 2, 4)).toBe(1)
+  })
+
+  it('페이드 아웃: 1→0 선형', () => {
+    expect(fadeOpacityMul(undefined, 2, 3, 4)).toBeCloseTo(0.5)
+    expect(fadeOpacityMul(undefined, 2, 4, 4)).toBe(0)
+  })
+
+  it('겹치는 인/아웃은 더 어두운 쪽', () => {
+    // 4초 클립에 3초 인 + 3초 아웃 → 2초 지점: in=2/3, out=2/3
+    expect(fadeOpacityMul(3, 3, 2, 4)).toBeCloseTo(2 / 3)
+    // 0.5초 지점: in=1/6 이 지배
+    expect(fadeOpacityMul(3, 3, 0.5, 4)).toBeCloseTo(1 / 6)
   })
 })
 

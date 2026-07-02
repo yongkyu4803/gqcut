@@ -7,8 +7,7 @@
  * 핸들 부족 시 VideoSource.getFrameAt 이 소스 범위로 클램프 → 자연스러운 프레임 홀드 fallback.
  */
 import type { Clip, Project, Track } from '@shared/model/types'
-import { resolveColorAdjust } from '@shared/effects-spec'
-import { transitionZone } from '@shared/effects-spec'
+import { fadeOpacityMul, resolveColorAdjust, transitionZone } from '@shared/effects-spec'
 import type { Layer, SceneItem } from './compositor'
 import { getImageBitmap, getVideoSource, VideoSource } from './videoSource'
 import { rasterizeText, textAnimState } from './textRaster'
@@ -74,10 +73,12 @@ function textLayer(clip: Clip, t: number): Layer | null {
   }
 }
 
-function visualLayerBase(clip: Clip): Pick<Layer, 'fitToCanvas' | 'opacity' | 'transform' | 'adjust'> {
+function visualLayerBase(clip: Clip, t: number): Pick<Layer, 'fitToCanvas' | 'opacity' | 'transform' | 'adjust'> {
+  // 페이드 인/아웃은 영상 불투명도에도 적용 (오디오 게인과 동일 수식 — effects-spec)
+  const fade = fadeOpacityMul(clip.fadeIn, clip.fadeOut, t - clip.timelineStart, clip.timelineEnd - clip.timelineStart)
   return {
     fitToCanvas: true,
-    opacity: clip.opacity,
+    opacity: (clip.opacity ?? 1) * fade,
     transform: clip.transform,
     adjust: resolveColorAdjust(clip.effects)
   }
@@ -98,10 +99,10 @@ function pollVideoLayer(project: Project, clip: Clip, t: number, instanceKey?: s
   src.pump(clipSourceTime(clip, t))
   const frame = src.displayFrame
   if (!frame) return null
-  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip) }
+  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip, t) }
 }
 
-function pollImageLayer(project: Project, clip: Clip): Layer | null {
+function pollImageLayer(project: Project, clip: Clip, t: number): Layer | null {
   if (!clip.assetId) return null
   const path = decodePath(project, clip.assetId, 'preview')
   if (!path) return null
@@ -112,13 +113,13 @@ function pollImageLayer(project: Project, clip: Clip): Layer | null {
       .catch(() => {})
     return null
   }
-  return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip) }
+  return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip, t) }
 }
 
 function pollClipLayer(project: Project, clip: Clip, t: number, instanceKey?: string): Layer | null {
   if (clip.kind === 'text') return textLayer(clip, t)
   if (clip.kind === 'video') return pollVideoLayer(project, clip, t, instanceKey)
-  if (clip.kind === 'image') return pollImageLayer(project, clip)
+  if (clip.kind === 'image') return pollImageLayer(project, clip, t)
   return null
 }
 
@@ -136,13 +137,13 @@ async function accurateClipLayer(
   if (clip.kind === 'image') {
     const bmp = await getImageBitmap(path)
     loadedImages.set(path, bmp)
-    return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip) }
+    return { source: bmp, srcWidth: bmp.width, srcHeight: bmp.height, ...visualLayerBase(clip, t) }
   }
   const src = await getVideoSource(path, instanceKey)
   loadedSources.set(cacheKey(path, instanceKey), src)
   const frame = await src.getFrameAt(clipSourceTime(clip, t))
   if (!frame) return null
-  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip) }
+  return { source: frame, srcWidth: src.width, srcHeight: src.height, ...visualLayerBase(clip, t) }
 }
 
 /** 프리뷰용 (논블로킹). 반환 순서는 아래→위 레이어 (tracks 배열은 위→아래이므로 역순). */

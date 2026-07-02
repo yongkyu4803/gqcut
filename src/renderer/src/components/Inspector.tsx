@@ -83,6 +83,12 @@ export function Inspector(): React.JSX.Element {
           <Row label="볼륨">
             <input type="range" min={0} max={1} step={0.01} value={clip.volume ?? 1} onChange={(e) => set('클립 볼륨', { volume: Number(e.target.value) })} />
           </Row>
+        </>
+      )}
+
+      {clip.kind !== 'text' && (
+        <>
+          <h4>페이드 {clip.kind === 'audio' ? '(소리)' : clip.kind === 'image' ? '(화면)' : '(화면·소리)'}</h4>
           <Row label="페이드 인(초)">
             <input type="number" min={0} step={0.1} value={clip.fadeIn ?? 0} onChange={(e) => set('페이드 인', { fadeIn: Math.max(0, Number(e.target.value)) })} />
           </Row>

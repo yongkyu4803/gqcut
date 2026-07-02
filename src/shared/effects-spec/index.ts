@@ -127,6 +127,17 @@ void main() {
 `
 
 /**
+ * 페이드 인/아웃의 시각 불투명도 배율 (CapCut 스타일: 페이드는 영상과 소리에 함께 적용).
+ * rel: 클립 내 상대 시간, len: 클립 길이. 오디오 게인 램프(scheduleClipGain)와 동일한 선형 수식.
+ */
+export function fadeOpacityMul(fadeIn: number | undefined, fadeOut: number | undefined, rel: number, len: number): number {
+  let m = 1
+  if (fadeIn && fadeIn > 0 && rel < fadeIn) m = Math.min(m, rel / fadeIn)
+  if (fadeOut && fadeOut > 0 && rel > len - fadeOut) m = Math.min(m, (len - rel) / fadeOut)
+  return Math.max(0, Math.min(1, m))
+}
+
+/**
  * 전환의 시간 의미론 (DATA-MODEL §1.1): 컷 지점을 중심으로 duration 구간.
  * 반환: [start, end] — 클립 길이로 클램프.
  */
