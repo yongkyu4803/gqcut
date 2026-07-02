@@ -16,7 +16,14 @@ jobs:
           cache: npm
       - run: npm ci
       # npm ci 가 electron postinstall(바이너리 다운로드)을 건너뛰는 경우 대비 — 멱등
-      - run: node node_modules/electron/install.js
+      - name: Electron 바이너리 보장 (+진단)
+        run: |
+          env | grep -iE "electron|npm_config" || true
+          ls node_modules/electron/ || true
+          cat node_modules/electron/path.txt 2>/dev/null || echo "(path.txt 없음)"
+          node node_modules/electron/install.js
+          cat node_modules/electron/path.txt
+          npx electron --version
       - run: npm run plan:validate
       - run: npm run typecheck
       - run: npm run test
