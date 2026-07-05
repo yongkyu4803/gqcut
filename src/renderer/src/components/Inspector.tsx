@@ -7,7 +7,7 @@ import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { formatTimecode } from '@shared/time'
-import { useEditor } from '@renderer/state/store'
+import { useEditor, type SilenceScope } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
@@ -174,11 +174,12 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
   const asset = clip.assetId ? project.assets.find((a) => a.id === clip.assetId) : undefined
   const [noiseDb, setNoiseDb] = useState(-35)
   const [minDurationSec, setMinDurationSec] = useState(0.5)
+  const [scope, setScope] = useState<SilenceScope>('this-track')
   if (!asset?.hasAudio) return null
 
   const run = async (): Promise<void> => {
     try {
-      const n = await detectSilence(clip.id, { noiseDb, minDurationSec })
+      const n = await detectSilence(clip.id, { noiseDb, minDurationSec, scope })
       if (n === 0) alert('무음 구간을 찾지 못했습니다')
     } catch (e) {
       alert(`무음 감지 실패: ${e instanceof Error ? e.message : e}`)
@@ -207,6 +208,12 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
               onChange={(e) => setMinDurationSec(Math.max(0.1, Number(e.target.value)))}
             />
           </Row>
+          <Row label="적용 범위">
+            <select data-testid="silence-scope-select" value={scope} onChange={(e) => setScope(e.target.value as SilenceScope)}>
+              <option value="this-track">이 트랙만</option>
+              <option value="all-tracks">전체 트랙(자막도 당기고, 배경음악은 위치만 밀림)</option>
+            </select>
+          </Row>
           <button
             className="btn small"
             data-testid="detect-silence-btn"
@@ -222,6 +229,8 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
         <>
           <p className="hint" style={{ fontSize: 11, textAlign: 'left' }}>
             {candidates.length}개 구간 감지됨 · 선택 {selectedCount}개 · 총 {totalSaved.toFixed(1)}초 절약
+            <br />
+            적용 범위: {preview.scope === 'all-tracks' ? '전체 트랙' : '이 트랙만'}
           </p>
           <div data-testid="silence-candidate-list" style={{ maxHeight: 140, overflowY: 'auto' }}>
             {candidates.map((c) => (

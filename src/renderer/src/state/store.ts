@@ -22,9 +22,13 @@ export interface SilenceCandidate {
   selected: boolean
 }
 
+/** 적용 범위 — this-track: 감지 트랙만 리플. all-tracks: 비디오/자막도 함께 리플하되 오디오(배경음악)는 위치만 민다 */
+export type SilenceScope = 'this-track' | 'all-tracks'
+
 export interface SilencePreview {
   trackId: string
   clipId: string
+  scope: SilenceScope
   candidates: SilenceCandidate[]
 }
 

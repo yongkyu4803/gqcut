@@ -19,6 +19,7 @@ import {
   removeClip,
   removeTrack,
   rippleDeleteRanges,
+  rippleDeleteRangesAllTracks,
   splitClip,
   trackAcceptsClip,
   trimClip,
@@ -265,6 +266,46 @@ describe('무음 리플 삭제 (rippleDeleteRanges)', () => {
     expect(track).toBeDefined()
     expect(track.clips).toHaveLength(0)
     expect(findClip(result, clipId)).toBeNull()
+  })
+
+  it('전체 트랙 스코프: 비디오/자막은 잘라 당기고, 오디오(배경음악)는 자르지 않고 위치만 민다', () => {
+    const { p, trackId } = setup() // 비디오 클립 [0,10)
+    const textTrack = p.tracks.find((t) => t.kind === 'text')!
+    const audioTrack = p.tracks.find((t) => t.kind === 'audio')!
+
+    let withOthers = addClip(p, textTrack.id, createTextClip(2, 3)) // 자막 [2,5)
+    const musicAsset: MediaAsset = { id: genId('asset'), kind: 'audio', path: '/tmp/m.mp3', duration: 3, status: 'ok' }
+    withOthers = addAsset(withOthers, musicAsset)
+    withOthers = addClip(withOthers, audioTrack.id, createMediaClip(musicAsset, 5)) // 배경음악 [5,8)
+
+    const result = rippleDeleteRangesAllTracks(withOthers, [[3, 4]])
+
+    // 비디오: 클립 내부 무음 제거 — 2조각
+    const videoClips = result.tracks.find((t) => t.id === trackId)!.clips
+    expect(videoClips).toHaveLength(2)
+    expect(videoClips[0]).toMatchObject({ timelineStart: expect.closeTo(0), timelineEnd: expect.closeTo(3) })
+    expect(videoClips[1]).toMatchObject({ timelineStart: expect.closeTo(3), timelineEnd: expect.closeTo(9) })
+
+    // 자막: 비디오와 동일하게 잘려서 당겨진다 (싱크 유지)
+    const textClips = result.tracks.find((t) => t.id === textTrack.id)!.clips
+    expect(textClips).toHaveLength(2)
+    expect(textClips[0]).toMatchObject({ timelineStart: expect.closeTo(2), timelineEnd: expect.closeTo(3) })
+    expect(textClips[1]).toMatchObject({ timelineStart: expect.closeTo(3), timelineEnd: expect.closeTo(4) })
+
+    // 배경음악: 잘리지 않고 위치만 밀린다 — 소스 구간·길이 그대로 보존(글리치 방지)
+    const musicClips = result.tracks.find((t) => t.id === audioTrack.id)!.clips
+    expect(musicClips).toHaveLength(1)
+    expect(musicClips[0].timelineStart).toBeCloseTo(4) // 5 - 1(제거된 만큼)
+    expect(musicClips[0].timelineEnd).toBeCloseTo(7)
+    expect(musicClips[0].sourceIn).toBeCloseTo(0)
+    expect(musicClips[0].sourceOut).toBeCloseTo(3)
+
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
+  it('전체 트랙 스코프: 빈 구간이면 원본을 그대로 반환한다', () => {
+    const { p } = setup()
+    expect(rippleDeleteRangesAllTracks(p, [])).toBe(p)
   })
 })
 

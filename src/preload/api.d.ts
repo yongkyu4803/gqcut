@@ -16,7 +16,7 @@ declare global {
       setSelectedClip(patch: Record<string, unknown>): void
       generateCaptions(model: string, language: string): Promise<number>
       exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }>
-      detectSilence(noiseDb: number, minDurationSec: number): Promise<number>
+      detectSilence(noiseDb: number, minDurationSec: number, scope?: 'this-track' | 'all-tracks'): Promise<number>
       toggleSilenceCandidate(id: string): void
       applySilenceCut(): void
       cancelSilencePreview(): void

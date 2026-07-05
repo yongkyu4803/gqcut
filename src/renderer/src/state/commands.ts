@@ -228,20 +228,9 @@ export function mergeClip(p: Project, clipId: string): Project {
   }))
 }
 
-/**
- * 무음 리플 삭제 — 지정 트랙에서 여러 구간(절대 타임라인 좌표)을 한 번에 잘라내고
- * 뒤 클립들을 당겨 갭을 없앤다. 다른 트랙에는 영향을 주지 않는다(단일 트랙 전제).
- * ranges 와 겹치는 기존 전환은 먼저 해제한 뒤, 각 클립을 남은(survivor) 구간들로 재구성한다.
- */
-export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[number, number]>): Project {
-  const track = p.tracks.find((t) => t.id === trackId)
-  if (!track) return p
-  const merged = mergeRanges(ranges)
-  if (merged.length === 0) return p
-
-  const remap = buildRippleRemap(merged)
-  const fps = p.settings.fps
-  const sorted = sortClips(track.clips)
+/** 트랙 클립 배열을 병합된 삭제 구간 기준으로 재구성한다 — 전환 해제 + survivor 분할 + remap 적용 (순수 배열 변환) */
+function rippleSpliceClips(clips: Clip[], merged: Array<[number, number]>, remap: (t: number) => number, fps: number): Clip[] {
+  const sorted = sortClips(clips)
 
   // 1) 삭제 구간과 겹치는 기존 전환은 먼저 해제 (전환 존이 손상된 채로 남지 않도록)
   const clearOut = new Set<number>()
@@ -302,8 +291,49 @@ export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[n
       })
     })
   }
+  return rebuilt
+}
 
+/** 트랙 클립들을 자르지 않고 위치만 민다 — 연속 재생 콘텐츠(배경음악 등)가 끊기지 않도록 클립 길이를 보존한다. */
+function shiftClips(clips: Clip[], remap: (t: number) => number): Clip[] {
+  return clips.map((c) => {
+    const shift = c.timelineStart - remap(c.timelineStart)
+    if (shift <= 1e-9) return c
+    return { ...c, timelineStart: c.timelineStart - shift, timelineEnd: c.timelineEnd - shift }
+  })
+}
+
+/**
+ * 무음 리플 삭제 — 지정 트랙에서 여러 구간(절대 타임라인 좌표)을 한 번에 잘라내고
+ * 뒤 클립들을 당겨 갭을 없앤다. 다른 트랙에는 영향을 주지 않는다(단일 트랙 전제).
+ * ranges 와 겹치는 기존 전환은 먼저 해제한 뒤, 각 클립을 남은(survivor) 구간들로 재구성한다.
+ */
+export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[number, number]>): Project {
+  const track = p.tracks.find((t) => t.id === trackId)
+  if (!track) return p
+  const merged = mergeRanges(ranges)
+  if (merged.length === 0) return p
+  const remap = buildRippleRemap(merged)
+  const rebuilt = rippleSpliceClips(track.clips, merged, remap, p.settings.fps)
   return mapTrack(p, trackId, (t) => ({ ...t, clips: sortClips(rebuilt) }))
+}
+
+/**
+ * 무음 리플 삭제(전체 트랙 스코프) — 비디오/텍스트 트랙은 감지 트랙과 동일하게 잘라 당기고,
+ * 오디오 트랙(배경음악 등 연속 재생 콘텐츠)은 잘라내지 않고 위치만 밀어 글리치를 피한다.
+ */
+export function rippleDeleteRangesAllTracks(p: Project, ranges: Array<[number, number]>): Project {
+  const merged = mergeRanges(ranges)
+  if (merged.length === 0) return p
+  const remap = buildRippleRemap(merged)
+  const fps = p.settings.fps
+
+  const newTracks = p.tracks.map((t) =>
+    t.kind === 'audio'
+      ? { ...t, clips: shiftClips(t.clips, remap) }
+      : { ...t, clips: sortClips(rippleSpliceClips(t.clips, merged, remap, fps)) }
+  )
+  return touch({ ...p, tracks: newTracks })
 }
 
 export function updateClip(p: Project, clipId: string, patch: Partial<Clip>): Project {

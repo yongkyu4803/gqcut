@@ -97,10 +97,10 @@ export function installTestHooks(): void {
     },
 
     /** 무음 감지 — 선택된 비디오 클립에서. 감지된 후보 구간 수 반환(미리보기 채움, 적용 안 함) */
-    detectSilence(noiseDb: number, minDurationSec: number): Promise<number> {
+    detectSilence(noiseDb: number, minDurationSec: number, scope?: 'this-track' | 'all-tracks'): Promise<number> {
       const id = useEditor.getState().selectedClipId
       if (!id) return Promise.resolve(0)
-      return detectSilence(id, { noiseDb, minDurationSec })
+      return detectSilence(id, { noiseDb, minDurationSec, scope })
     },
 
     /** 무음 감지 후보 구간 선택/해제 토글 */

@@ -6,12 +6,14 @@
  */
 import { genId } from '@shared/model/factory'
 import { mapSilenceToTimeline, mergeRanges } from '@shared/silence'
-import { useEditor, type SilenceCandidate } from '@renderer/state/store'
-import { findClip, rippleDeleteRanges } from '@renderer/state/commands'
+import { useEditor, type SilenceCandidate, type SilenceScope } from '@renderer/state/store'
+import { findClip, rippleDeleteRanges, rippleDeleteRangesAllTracks } from '@renderer/state/commands'
 
 export interface DetectSilenceOptions {
   noiseDb: number
   minDurationSec: number
+  /** this-track(기본): 감지 트랙만 리플. all-tracks: 비디오/자막도 함께 리플, 오디오는 위치만 밀림 */
+  scope?: SilenceScope
 }
 
 /** 선택된 클립의 무음 구간을 감지해 silencePreview 를 채운다. 후보 개수를 반환(0 이면 못 찾음). */
@@ -64,7 +66,7 @@ export async function detectSilence(clipId: string, opts: DetectSilenceOptions):
     }
 
     const candidates: SilenceCandidate[] = ranges.map(([start, end]) => ({ id: genId('sc'), start, end, selected: true }))
-    useEditor.getState().setSilencePreview({ trackId: track.id, clipId, candidates })
+    useEditor.getState().setSilencePreview({ trackId: track.id, clipId, scope: opts.scope ?? 'this-track', candidates })
     return candidates.length
   } finally {
     off()
@@ -79,7 +81,10 @@ export function applySilenceCut(): void {
   const ranges: Array<[number, number]> = preview.candidates.filter((c) => c.selected).map((c) => [c.start, c.end])
   useEditor.getState().setSilencePreview(null)
   if (ranges.length === 0) return
-  useEditor.getState().dispatch('무음 컷', (p) => rippleDeleteRanges(p, preview.trackId, ranges))
+  const trackId = preview.trackId
+  useEditor
+    .getState()
+    .dispatch('무음 컷', (p) => (preview.scope === 'all-tracks' ? rippleDeleteRangesAllTracks(p, ranges) : rippleDeleteRanges(p, trackId, ranges)))
 }
 
 /** 미리보기만 폐기한다(프로젝트는 건드리지 않음). */

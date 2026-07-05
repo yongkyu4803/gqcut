@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path'
 const ROOT = resolve(__dirname, '..')
 const FIXTURES = join(ROOT, 'e2e', '.fixtures')
 const SAMPLE = join(FIXTURES, 'silence_sample.mp4')
+const MUSIC = join(FIXTURES, 'silence_music.m4a')
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ffmpegPath: string = require('ffmpeg-static')
@@ -30,6 +31,10 @@ test.beforeAll(() => {
       '-c:a', 'aac',
       SAMPLE
     ])
+  }
+  if (!existsSync(MUSIC)) {
+    // 오디오 전용(비디오 스트림 없음) 6초 배경음악 픽스처 — kind: 'audio' 로 프로브됨
+    execFileSync(ffmpegPath, ['-y', '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000', '-t', '6', '-c:a', 'aac', MUSIC])
   }
 })
 
@@ -82,6 +87,38 @@ test('무음 감지 → 미리보기(선택 해제/재선택) → 적용 → und
   const restored = await getClips()
   expect(restored).toHaveLength(1)
   expect(restored[0].timelineEnd).toBeCloseTo(4, 1)
+
+  await app.close()
+})
+
+test('전체 트랙 스코프: 배경음악은 잘리지 않고 위치만 밀린다', async () => {
+  const app = await electron.launch({ args: [join(ROOT, 'out', 'main', 'index.js')], env: { ...process.env, E2E: '1' } })
+  const win = await app.firstWindow()
+  win.on('dialog', (d) => void d.accept())
+  await win.waitForSelector('[data-testid="import-btn"]')
+
+  await win.evaluate((p) => window.__test!.importFile(p), SAMPLE)
+  await win.waitForSelector('[data-testid^="clip-"]')
+  const proj0 = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  const videoClipId = proj0.tracks.find((t: { kind: string }) => t.kind === 'video').clips[0].id
+
+  // 배경음악 임포트(오디오 트랙에 배치) — 임포트하면 이 클립이 선택되므로 이후 비디오 클립을 다시 선택해야 함
+  await win.evaluate((p) => window.__test!.importFile(p), MUSIC)
+  await win.click(`[data-testid="clip-${videoClipId}"]`)
+
+  const n = await win.evaluate(() => window.__test!.detectSilence(-30, 0.3, 'all-tracks'))
+  expect(n).toBe(1)
+  await win.click('[data-testid="apply-silence-btn"]')
+
+  const project = JSON.parse(await win.evaluate(() => window.__test!.getProjectJson()))
+  const videoClips = project.tracks.find((t: { kind: string }) => t.kind === 'video').clips
+  expect(videoClips).toHaveLength(2) // 비디오는 무음 구간에서 잘려 2조각
+
+  const musicClips = project.tracks.find((t: { kind: string }) => t.kind === 'audio').clips
+  expect(musicClips).toHaveLength(1) // 음악은 잘리지 않고 한 조각 그대로
+  const musicDuration = musicClips[0].timelineEnd - musicClips[0].timelineStart
+  expect(musicDuration).toBeGreaterThan(5.8)
+  expect(musicDuration).toBeLessThan(6.2) // 원본 6초 길이 그대로 보존(글리치 없음)
 
   await app.close()
 })
