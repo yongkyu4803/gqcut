@@ -4,6 +4,9 @@
  */
 import type { Clip, MediaAsset, Project, Track } from '@shared/model/types'
 import { snapToFrame } from '@shared/time'
+import { genId } from '@shared/model/factory'
+import { buildRippleRemap, mergeRanges } from '@shared/silence'
+import { transitionZone } from '@shared/effects-spec'
 
 function touch(p: Project): Project {
   return { ...p, updatedAt: new Date().toISOString() }
@@ -167,6 +170,140 @@ export function splitClip(p: Project, clipId: string, atTime: number, newId: str
     ...tr,
     clips: sortClips(tr.clips.flatMap((c) => (c.id === clipId ? [left, right] : [c])))
   }))
+}
+
+const MERGE_EPS = 1e-3
+
+/** a 가 b 바로 앞에 맞닿아 있고(같은 트랙 전제), 하나로 합쳐도 불변식이 깨지지 않는가 (분할의 역연산) */
+function clipsMergeable(a: Clip, b: Clip): boolean {
+  if (Math.abs(a.timelineEnd - b.timelineStart) > MERGE_EPS) return false
+  if (a.kind !== b.kind) return false
+  if (a.assetId !== b.assetId) return false // text 는 둘 다 undefined 라 통과
+  if (a.kind === 'text' || a.kind === 'image') return true
+  if ((a.speed ?? 1) !== (b.speed ?? 1)) return false
+  if (a.sourceOut === undefined || b.sourceIn === undefined) return false
+  return Math.abs(a.sourceOut - b.sourceIn) <= MERGE_EPS
+}
+
+/** 선택 클립이 앞/뒤 이웃과 병합 가능한가 (버튼/단축키 활성화 판정용) */
+export function canMergeClip(p: Project, clipId: string): boolean {
+  const found = findClip(p, clipId)
+  if (!found) return false
+  const sorted = sortClips(found.track.clips)
+  const idx = sorted.findIndex((c) => c.id === clipId)
+  const next = sorted[idx + 1]
+  const prev = idx > 0 ? sorted[idx - 1] : undefined
+  return Boolean((next && clipsMergeable(found.clip, next)) || (prev && clipsMergeable(prev, found.clip)))
+}
+
+/**
+ * 컷 병합 — 선택 클립을 인접한(다음 우선, 없으면 이전) 이웃과 하나로 합친다.
+ * 같은 트랙·같은 소스에서 맞닿아 있어야 하며(분할의 역연산), 아니면 그대로 반환한다.
+ * 병합 결과는 항상 clipId 를 유지해 선택이 끊기지 않는다.
+ */
+export function mergeClip(p: Project, clipId: string): Project {
+  const found = findClip(p, clipId)
+  if (!found) return p
+  const { track, clip } = found
+  const sorted = sortClips(track.clips)
+  const idx = sorted.findIndex((c) => c.id === clipId)
+  const next = sorted[idx + 1]
+  const prev = idx > 0 ? sorted[idx - 1] : undefined
+
+  let merged: Clip
+  let removeId: string
+  if (next && clipsMergeable(clip, next)) {
+    merged = { ...clip, timelineEnd: next.timelineEnd, sourceOut: next.sourceOut, transitionOut: next.transitionOut }
+    removeId = next.id
+  } else if (prev && clipsMergeable(prev, clip)) {
+    merged = { ...clip, timelineStart: prev.timelineStart, sourceIn: prev.sourceIn, transitionIn: prev.transitionIn }
+    removeId = prev.id
+  } else {
+    return p
+  }
+
+  return mapTrack(p, track.id, (t) => ({
+    ...t,
+    clips: sortClips(t.clips.filter((c) => c.id !== removeId).map((c) => (c.id === clipId ? merged : c)))
+  }))
+}
+
+/**
+ * 무음 리플 삭제 — 지정 트랙에서 여러 구간(절대 타임라인 좌표)을 한 번에 잘라내고
+ * 뒤 클립들을 당겨 갭을 없앤다. 다른 트랙에는 영향을 주지 않는다(단일 트랙 전제).
+ * ranges 와 겹치는 기존 전환은 먼저 해제한 뒤, 각 클립을 남은(survivor) 구간들로 재구성한다.
+ */
+export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[number, number]>): Project {
+  const track = p.tracks.find((t) => t.id === trackId)
+  if (!track) return p
+  const merged = mergeRanges(ranges)
+  if (merged.length === 0) return p
+
+  const remap = buildRippleRemap(merged)
+  const fps = p.settings.fps
+  const sorted = sortClips(track.clips)
+
+  // 1) 삭제 구간과 겹치는 기존 전환은 먼저 해제 (전환 존이 손상된 채로 남지 않도록)
+  const clearOut = new Set<number>()
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i]
+    const b = sorted[i + 1]
+    if (!a.transitionOut || Math.abs(b.timelineStart - a.timelineEnd) > 1e-3) continue
+    const zone = transitionZone(a.timelineEnd, a.transitionOut.duration, a.timelineStart, b.timelineEnd)
+    if (merged.some(([s, e]) => s < zone.end && e > zone.start)) clearOut.add(i)
+  }
+  const cleared = sorted.map((c, i) => {
+    const patch: Partial<Clip> = {}
+    if (clearOut.has(i)) patch.transitionOut = undefined
+    if (i > 0 && clearOut.has(i - 1)) patch.transitionIn = undefined
+    return Object.keys(patch).length ? { ...c, ...patch } : c
+  })
+
+  // 2) 클립마다 삭제 구간과의 교집합을 빼고 남은 survivor 구간들로 재구성
+  const minLen = 1 / fps
+  const rebuilt: Clip[] = []
+  for (const clip of cleared) {
+    const cuts = merged
+      .map((r): [number, number] => [Math.max(r[0], clip.timelineStart), Math.min(r[1], clip.timelineEnd)])
+      .filter(([s, e]) => e - s > 1e-6)
+
+    const survivors: Array<[number, number]> = []
+    if (cuts.length === 0) {
+      survivors.push([clip.timelineStart, clip.timelineEnd])
+    } else {
+      let cursor = clip.timelineStart
+      for (const [cs, ce] of cuts) {
+        if (cs - cursor > 1e-6) survivors.push([cursor, cs])
+        cursor = Math.max(cursor, ce)
+      }
+      if (clip.timelineEnd - cursor > 1e-6) survivors.push([cursor, clip.timelineEnd])
+    }
+
+    const kept = survivors.filter(([s, e]) => e - s >= minLen - 1e-6)
+    if (kept.length === 0) continue // 클립 전체가 삭제 구간에 덮임
+
+    const speed = clip.speed ?? 1
+    kept.forEach(([segStart, segEnd], i) => {
+      const isFirst = i === 0 && Math.abs(segStart - clip.timelineStart) < 1e-6
+      const isLast = i === kept.length - 1 && Math.abs(segEnd - clip.timelineEnd) < 1e-6
+      rebuilt.push({
+        ...clip,
+        id: i === 0 ? clip.id : genId('clip'),
+        timelineStart: snapToFrame(remap(segStart), fps),
+        timelineEnd: snapToFrame(remap(segEnd), fps),
+        ...(clip.sourceIn !== undefined && clip.kind !== 'image'
+          ? {
+              sourceIn: clip.sourceIn + (segStart - clip.timelineStart) * speed,
+              sourceOut: clip.sourceIn + (segEnd - clip.timelineStart) * speed
+            }
+          : {}),
+        transitionIn: isFirst ? clip.transitionIn : undefined,
+        transitionOut: isLast ? clip.transitionOut : undefined
+      })
+    })
+  }
+
+  return mapTrack(p, trackId, (t) => ({ ...t, clips: sortClips(rebuilt) }))
 }
 
 export function updateClip(p: Project, clipId: string, patch: Partial<Clip>): Project {

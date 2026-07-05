@@ -98,14 +98,24 @@ test('임포트 → 컷 → undo/redo → 텍스트/필터/전환 → 내보내�
     return project.tracks.find((t: { kind: string }) => t.kind === 'video').clips
   }
 
-  // 컷 편집 (1.2.4): 2초 지점에서 분할
+  // 컷 편집 (1.2.4): 2초 지점에서 분할 — 단축키 C 로 검증
   await win.evaluate(() => window.__test!.seek(2))
   await win.waitForTimeout(300)
-  await win.evaluate(() => window.__test!.splitAtPlayhead())
+  await win.keyboard.press('c')
   let clips = await getClips()
   expect(clips).toHaveLength(2)
   expect(clips[0].timelineEnd).toBeCloseTo(2, 2)
   expect(clips[1].sourceIn).toBeCloseTo(2, 2)
+
+  // 컷 병합 (분할의 역연산): 왼쪽 클립 선택 후 병합 버튼 → 원래 1클립으로 복원
+  await win.click(`[data-testid="clip-${clips[0].id}"]`)
+  await win.click('[data-testid="merge-btn"]')
+  let mergedClips = await getClips()
+  expect(mergedClips).toHaveLength(1)
+  expect(mergedClips[0].timelineEnd).toBeCloseTo(4, 2)
+  await win.keyboard.press('r') // 되돌리기 단축키(R) 검증 — 병합 취소 → 2클립 상태 복원
+  clips = await getClips()
+  expect(clips).toHaveLength(2)
 
   // 삭제 → undo → redo → undo (1.1.3, 1.2.6): 최종적으로 2클립 유지
   await win.click(`[data-testid="clip-${clips[1].id}"]`)

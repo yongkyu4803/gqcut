@@ -2,7 +2,15 @@
  * preload — 화이트리스트 API 만 contextBridge 로 노출 (보안: nodeIntegration off, contextIsolation on)
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { EditorApi, ExportStartOptions, ProxyProgress, SttProgressEvent, SttTranscribeOptions } from '../shared/ipc-types'
+import type {
+  EditorApi,
+  ExportStartOptions,
+  ProxyProgress,
+  SilenceDetectOptions,
+  SilenceProgressEvent,
+  SttProgressEvent,
+  SttTranscribeOptions
+} from '../shared/ipc-types'
 
 const api: EditorApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
@@ -45,6 +53,14 @@ const api: EditorApi = {
     return () => ipcRenderer.off('stt:progress', listener)
   },
   saveSrtDialog: (defaultName, content) => ipcRenderer.invoke('export:saveSrt', defaultName, content),
+
+  silenceDetect: (opts: SilenceDetectOptions) => ipcRenderer.invoke('silence:detect', opts),
+  silenceCancel: (jobId) => ipcRenderer.invoke('silence:cancel', jobId),
+  onSilenceProgress: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: SilenceProgressEvent) => cb(p)
+    ipcRenderer.on('silence:progress', listener)
+    return () => ipcRenderer.off('silence:progress', listener)
+  },
 
   fileExists: (path) => ipcRenderer.invoke('media:fileExists', path)
 }

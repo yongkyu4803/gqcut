@@ -38,6 +38,8 @@ export function Timeline(): React.JSX.Element {
   const dispatch = useEditor((s) => s.dispatch)
   const select = useEditor((s) => s.select)
   const setZoom = useEditor((s) => s.setZoom)
+  const silencePreview = useEditor((s) => s.silencePreview)
+  const toggleSilenceCandidate = useEditor((s) => s.toggleSilenceCandidate)
 
   const [drag, setDrag] = useState<DragState | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -261,6 +263,18 @@ export function Timeline(): React.JSX.Element {
                   />
                 )
               })}
+              {silencePreview?.trackId === track.id &&
+                silencePreview.candidates.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`silence-marker ${c.selected ? '' : 'deselected'}`}
+                    data-testid={`silence-marker-${c.id}`}
+                    style={{ left: c.start * pxPerSec, width: Math.max(2, (c.end - c.start) * pxPerSec) }}
+                    title="클릭해서 이 구간을 컷 대상에서 제외/포함"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => toggleSilenceCandidate(c.id)}
+                  />
+                ))}
             </div>
           </div>
         ))}

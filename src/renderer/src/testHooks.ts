@@ -11,6 +11,7 @@ import { playback } from './engine/playback'
 import { captureReferenceFrame, exportTimeline, DEFAULT_EXPORT_SETTINGS } from './engine/exporter'
 import { generateCaptions } from './stt/autoCaption'
 import type { SttModel } from '@shared/subtitles'
+import { applySilenceCut, cancelSilencePreview, detectSilence } from './silence/autoCut'
 
 export function installTestHooks(): void {
   window.__test = {
@@ -93,6 +94,33 @@ export function installTestHooks(): void {
       const handle = exportTimeline(useEditor.getState().project, path, DEFAULT_EXPORT_SETTINGS, () => {})
       const result = await handle.promise
       return { ok: result.ok, error: result.error, stats: result.stats }
+    },
+
+    /** 무음 감지 — 선택된 비디오 클립에서. 감지된 후보 구간 수 반환(미리보기 채움, 적용 안 함) */
+    detectSilence(noiseDb: number, minDurationSec: number): Promise<number> {
+      const id = useEditor.getState().selectedClipId
+      if (!id) return Promise.resolve(0)
+      return detectSilence(id, { noiseDb, minDurationSec })
+    },
+
+    /** 무음 감지 후보 구간 선택/해제 토글 */
+    toggleSilenceCandidate(id: string): void {
+      useEditor.getState().toggleSilenceCandidate(id)
+    },
+
+    /** 현재 미리보기의 선택된 구간만 리플 삭제로 적용(단일 undo) */
+    applySilenceCut(): void {
+      applySilenceCut()
+    },
+
+    /** 미리보기 폐기 */
+    cancelSilencePreview(): void {
+      cancelSilencePreview()
+    },
+
+    /** 현재 무음 감지 미리보기 상태(JSON) — e2e 검증용 */
+    getSilencePreviewJson(): string {
+      return JSON.stringify(useEditor.getState().silencePreview)
     }
   }
 }

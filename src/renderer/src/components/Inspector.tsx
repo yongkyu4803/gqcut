@@ -6,10 +6,12 @@ import { useEffect, useState } from 'react'
 import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
+import { formatTimecode } from '@shared/time'
 import { useEditor } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
+import { applySilenceCut, cancelSilencePreview, detectSilence } from '@renderer/silence/autoCut'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -104,6 +106,8 @@ export function Inspector(): React.JSX.Element {
 
       {clip.kind === 'video' && <CaptionPanel clip={clip} />}
 
+      {clip.kind === 'video' && <SilenceCutPanel clip={clip} />}
+
       {clip.kind === 'text' && clip.text && <TextPanel clip={clip} text={clip.text} onSet={set} />}
     </div>
   )
@@ -157,6 +161,94 @@ function CaptionPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
       <p className="hint" style={{ fontSize: 10, textAlign: 'left' }}>
         첫 실행 시 모델({STT_MODEL_INFO[model].approxMB}MB)을 한 번 내려받습니다. 오프라인 처리.
       </p>
+    </>
+  )
+}
+
+/** 무음 자동 컷 — 선택 비디오 클립의 무음 구간을 감지해 미리보기 후 적용(사용자 확인 필요) */
+function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
+  const project = useEditor((s) => s.project)
+  const silenceActive = useEditor((s) => !!s.silenceProgress?.active)
+  const preview = useEditor((s) => s.silencePreview)
+  const toggleCandidate = useEditor((s) => s.toggleSilenceCandidate)
+  const asset = clip.assetId ? project.assets.find((a) => a.id === clip.assetId) : undefined
+  const [noiseDb, setNoiseDb] = useState(-35)
+  const [minDurationSec, setMinDurationSec] = useState(0.5)
+  if (!asset?.hasAudio) return null
+
+  const run = async (): Promise<void> => {
+    try {
+      const n = await detectSilence(clip.id, { noiseDb, minDurationSec })
+      if (n === 0) alert('무음 구간을 찾지 못했습니다')
+    } catch (e) {
+      alert(`무음 감지 실패: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  const showPreview = preview?.clipId === clip.id
+  const candidates = showPreview ? preview.candidates : []
+  const selectedCount = candidates.filter((c) => c.selected).length
+  const totalSaved = candidates.filter((c) => c.selected).reduce((sum, c) => sum + (c.end - c.start), 0)
+
+  return (
+    <>
+      <h4>무음 자동 컷</h4>
+      {!showPreview && (
+        <>
+          <Row label="임계값(dB)">
+            <input type="number" step={1} value={noiseDb} onChange={(e) => setNoiseDb(Number(e.target.value))} />
+          </Row>
+          <Row label="최소 길이(초)">
+            <input
+              type="number"
+              min={0.1}
+              step={0.1}
+              value={minDurationSec}
+              onChange={(e) => setMinDurationSec(Math.max(0.1, Number(e.target.value)))}
+            />
+          </Row>
+          <button
+            className="btn small"
+            data-testid="detect-silence-btn"
+            disabled={silenceActive}
+            onClick={() => void run()}
+            style={{ width: '100%', marginTop: 4 }}
+          >
+            ✦ 무음 감지
+          </button>
+        </>
+      )}
+      {showPreview && (
+        <>
+          <p className="hint" style={{ fontSize: 11, textAlign: 'left' }}>
+            {candidates.length}개 구간 감지됨 · 선택 {selectedCount}개 · 총 {totalSaved.toFixed(1)}초 절약
+          </p>
+          <div data-testid="silence-candidate-list" style={{ maxHeight: 140, overflowY: 'auto' }}>
+            {candidates.map((c) => (
+              <label key={c.id} className="insp-row" style={{ fontSize: 11 }}>
+                <input type="checkbox" checked={c.selected} onChange={() => toggleCandidate(c.id)} />
+                <span>
+                  {formatTimecode(c.start, project.settings.fps)} – {formatTimecode(c.end, project.settings.fps)}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            <button
+              className="btn small"
+              data-testid="apply-silence-btn"
+              disabled={selectedCount === 0}
+              onClick={() => applySilenceCut()}
+              style={{ flex: 1 }}
+            >
+              적용
+            </button>
+            <button className="btn small" data-testid="cancel-silence-btn" onClick={() => cancelSilencePreview()} style={{ flex: 1 }}>
+              취소
+            </button>
+          </div>
+        </>
+      )}
     </>
   )
 }

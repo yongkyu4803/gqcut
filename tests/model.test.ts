@@ -11,11 +11,14 @@ import {
   addAsset,
   addClip,
   addClipOverlay,
+  canMergeClip,
+  mergeClip,
   moveClip,
   moveClipToTrack,
   projectDuration,
   removeClip,
   removeTrack,
+  rippleDeleteRanges,
   splitClip,
   trackAcceptsClip,
   trimClip,
@@ -112,6 +115,49 @@ describe('클립 조작 커맨드', () => {
     expect(right.sourceIn).toBeCloseTo(4) // 2초 × 2배속
   })
 
+  it('병합: 분할한 두 클립을 다시 하나로 합치면 원래 클립과 동일해진다', () => {
+    const { p, trackId, clipId } = setup()
+    const split = splitClip(p, clipId, 4, 'clip_new')
+    expect(canMergeClip(split, clipId)).toBe(true)
+    const merged = mergeClip(split, clipId)
+    const track = merged.tracks.find((t) => t.id === trackId)!
+    expect(track.clips).toHaveLength(1)
+    const c = track.clips[0]
+    expect(c.id).toBe(clipId)
+    expect(c.timelineStart).toBeCloseTo(0)
+    expect(c.timelineEnd).toBeCloseTo(10)
+    expect(c.sourceIn).toBeCloseTo(0)
+    expect(c.sourceOut).toBeCloseTo(10)
+    expect(checkInvariants(merged)).toHaveLength(0)
+  })
+
+  it('병합: 오른쪽(뒤) 클립을 선택해도 이전 클립과 합쳐지고 선택 id 는 유지된다', () => {
+    const { p, trackId, clipId } = setup()
+    const split = splitClip(p, clipId, 4, 'clip_new')
+    expect(canMergeClip(split, 'clip_new')).toBe(true)
+    const merged = mergeClip(split, 'clip_new')
+    const track = merged.tracks.find((t) => t.id === trackId)!
+    expect(track.clips).toHaveLength(1)
+    expect(track.clips[0].id).toBe('clip_new')
+    expect(track.clips[0].timelineStart).toBeCloseTo(0)
+    expect(checkInvariants(merged)).toHaveLength(0)
+  })
+
+  it('병합: 떨어져 있거나(gap) 소스가 이어지지 않으면 병합되지 않는다', () => {
+    const { p, trackId, assetId, clipId } = setup()
+    const asset = p.assets.find((a) => a.id === assetId)!
+    // 클립1 [0,10) 뒤에 gap 을 두고 클립2 [12,22) 배치 — 맞닿아 있지 않음
+    const p2 = addClip(p, trackId, createMediaClip(asset, 12))
+    const gapNeighborId = p2.tracks.find((t) => t.id === trackId)!.clips[1].id
+    expect(canMergeClip(p2, clipId)).toBe(false)
+    expect(mergeClip(p2, clipId)).toBe(p2)
+
+    // 클립2 를 클립1 에 딱 맞닿게 이동은 하되, 서로 다른 소스 구간이라 병합 불가
+    const p3 = moveClip(p2, gapNeighborId, 10)
+    expect(canMergeClip(p3, clipId)).toBe(false)
+    expect(mergeClip(p3, clipId)).toBe(p3)
+  })
+
   it('경계(끝) 분할은 무시된다', () => {
     const { p, trackId, clipId } = setup()
     const s1 = splitClip(p, clipId, 0, 'x')
@@ -125,6 +171,100 @@ describe('클립 조작 커맨드', () => {
     const asset = p.assets.find((a) => a.id === assetId)!
     const p2 = addClip(p, trackId, createMediaClip(asset, 20))
     expect(projectDuration(p2)).toBeCloseTo(30)
+  })
+})
+
+describe('무음 리플 삭제 (rippleDeleteRanges)', () => {
+  it('클립 내부 단일 무음 제거 — 2조각으로 나뉘고 뒤 클립이 당겨진다', () => {
+    const { p, trackId, assetId } = setup()
+    const asset = p.assets.find((a) => a.id === assetId)!
+    const p2 = addClip(p, trackId, createMediaClip(asset, 10)) // [10,20)
+    const result = rippleDeleteRanges(p2, trackId, [[3, 4]])
+    const clips = result.tracks.find((t) => t.id === trackId)!.clips
+    expect(clips).toHaveLength(3)
+    expect(clips[0].timelineStart).toBeCloseTo(0)
+    expect(clips[0].timelineEnd).toBeCloseTo(3)
+    expect(clips[0].sourceOut).toBeCloseTo(3)
+    expect(clips[1].timelineStart).toBeCloseTo(3)
+    expect(clips[1].timelineEnd).toBeCloseTo(9)
+    expect(clips[1].sourceIn).toBeCloseTo(4)
+    expect(clips[1].sourceOut).toBeCloseTo(10)
+    expect(clips[2].timelineStart).toBeCloseTo(9) // 원래 10 이었던 뒤 클립이 1초 당겨짐
+    expect(clips[2].timelineEnd).toBeCloseTo(19)
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
+  it('클립 시작 경계에 걸친 무음은 앞부분만 트림되고 트랙 맨 앞으로 다시 붙는다', () => {
+    const { p, trackId, clipId } = setup()
+    const result = rippleDeleteRanges(p, trackId, [[0, 1]])
+    const clips = result.tracks.find((t) => t.id === trackId)!.clips
+    expect(clips).toHaveLength(1)
+    expect(clips[0].id).toBe(clipId)
+    expect(clips[0].timelineStart).toBeCloseTo(0)
+    expect(clips[0].timelineEnd).toBeCloseTo(9)
+    expect(clips[0].sourceIn).toBeCloseTo(1)
+    expect(clips[0].sourceOut).toBeCloseTo(10)
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
+  it('겹치거나 인접한 여러 무음 구간은 병합 후 누적 delta 로 반영된다', () => {
+    const { p, trackId } = setup()
+    // [2,3) 과 [2.9,4) 는 병합되어 [2,4), 별개로 [6,7) — 총 3초 제거
+    const result = rippleDeleteRanges(p, trackId, [
+      [2, 3],
+      [2.9, 4],
+      [6, 7]
+    ])
+    const clips = result.tracks.find((t) => t.id === trackId)!.clips
+    expect(clips).toHaveLength(3)
+    expect(clips[0]).toMatchObject({ timelineStart: expect.closeTo(0), timelineEnd: expect.closeTo(2) })
+    expect(clips[1]).toMatchObject({ timelineStart: expect.closeTo(2), timelineEnd: expect.closeTo(4) })
+    expect(clips[1].sourceIn).toBeCloseTo(4)
+    expect(clips[1].sourceOut).toBeCloseTo(6)
+    expect(clips[2]).toMatchObject({ timelineStart: expect.closeTo(4), timelineEnd: expect.closeTo(7) })
+    expect(clips[2].sourceIn).toBeCloseTo(7)
+    expect(clips[2].sourceOut).toBeCloseTo(10)
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
+  it('전환 구간과 겹치는 무음은 전환을 제거하고, 겹치지 않는 무음은 유지한다 (불변식 4/6/7)', () => {
+    const { p, trackId, assetId, clipId } = setup()
+    const asset = p.assets.find((a) => a.id === assetId)!
+    let base = addClip(p, trackId, createMediaClip(asset, 10)) // 인접 클립 [10,20)
+    base = updateClip(base, clipId, { transitionOut: { type: 'dissolve', duration: 2 } }) // zone [9,11]
+
+    const overlapping = rippleDeleteRanges(base, trackId, [[9.5, 10.5]])
+    expect(overlapping.tracks.find((t) => t.id === trackId)!.clips.some((c) => c.transitionOut)).toBe(false)
+    expect(checkInvariants(overlapping)).toHaveLength(0)
+
+    const nonOverlapping = rippleDeleteRanges(base, trackId, [[2, 3]])
+    expect(nonOverlapping.tracks.find((t) => t.id === trackId)!.clips.some((c) => c.transitionOut?.type === 'dissolve')).toBe(true)
+    expect(checkInvariants(nonOverlapping)).toHaveLength(0)
+  })
+
+  it('리플은 지정 트랙만 바꾸고 다른 트랙(자막 등)은 그대로 둔다', () => {
+    const { p, trackId } = setup()
+    const textTrack = p.tracks.find((t) => t.kind === 'text')!
+    const withText = addClip(p, textTrack.id, createTextClip(2, 3)) // [2,5)
+    const result = rippleDeleteRanges(withText, trackId, [[3, 4]])
+    const resultText = result.tracks.find((t) => t.id === textTrack.id)!.clips[0]
+    expect(resultText.timelineStart).toBeCloseTo(2)
+    expect(resultText.timelineEnd).toBeCloseTo(5)
+  })
+
+  it('빈 구간이거나 존재하지 않는 트랙이면 원본을 그대로 반환한다', () => {
+    const { p, trackId } = setup()
+    expect(rippleDeleteRanges(p, trackId, [])).toBe(p)
+    expect(rippleDeleteRanges(p, 'nonexistent', [[1, 2]])).toBe(p)
+  })
+
+  it('클립 전체가 삭제 구간에 덮이면 클립이 사라지고 트랙 자체는 남는다', () => {
+    const { p, trackId, clipId } = setup()
+    const result = rippleDeleteRanges(p, trackId, [[0, 10]])
+    const track = result.tracks.find((t) => t.id === trackId)!
+    expect(track).toBeDefined()
+    expect(track.clips).toHaveLength(0)
+    expect(findClip(result, clipId)).toBeNull()
   })
 })
 

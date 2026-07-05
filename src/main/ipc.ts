@@ -11,7 +11,8 @@ import { extractAudioWav, makeCompatProxy, makePerfProxy } from './ffmpeg/proxy'
 import { checkAutosave, clearAutosave, openProjectFrom, saveProjectTo, writeAutosave } from './project'
 import { audioDone, cancelExport, finishExport, startExport, writeAudioChunk, writeFrame } from './export'
 import { cancelTranscribe, transcribe } from './stt'
-import type { ExportStartOptions, SttTranscribeOptions } from '../shared/ipc-types'
+import { cancelSilenceDetect, detectSilence } from './silence'
+import type { ExportStartOptions, SilenceDetectOptions, SttTranscribeOptions } from '../shared/ipc-types'
 import type { SttModel } from '../shared/subtitles'
 
 export function registerIpcHandlers(): void {
@@ -133,6 +134,21 @@ export function registerIpcHandlers(): void {
     }
   })
   ipcMain.handle('stt:cancel', (_e, jobId: string) => cancelTranscribe(jobId))
+
+  // 무음 감지
+  ipcMain.handle('silence:detect', async (e, opts: SilenceDetectOptions) => {
+    const sender = e.sender
+    try {
+      const intervals = await detectSilence(opts, (p) => {
+        if (!sender.isDestroyed()) sender.send('silence:progress', { jobId: opts.jobId, ...p })
+      })
+      return { ok: true, intervals }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: msg }
+    }
+  })
+  ipcMain.handle('silence:cancel', (_e, jobId: string) => cancelSilenceDetect(jobId))
 
   ipcMain.handle('export:saveSrt', async (e, defaultName: string, content: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)

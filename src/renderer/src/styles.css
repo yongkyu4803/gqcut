@@ -406,6 +406,20 @@ select {
 .clip.selected .trim-handle.right {
   border-right-color: var(--accent-2);
 }
+.silence-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 90, 90, 0.35);
+  border: 1px solid rgba(255, 90, 90, 0.75);
+  z-index: 3;
+  cursor: pointer;
+}
+.silence-marker.deselected {
+  background: rgba(255, 90, 90, 0.08);
+  border-style: dashed;
+  border-color: rgba(255, 90, 90, 0.35);
+}
 .playhead {
   position: absolute;
   top: 0;

@@ -14,6 +14,20 @@ export interface HistoryEntry {
   after: Project
 }
 
+/** 무음 감지 후보 구간 (미리보기, 히스토리 비대상) — 절대 타임라인 좌표 */
+export interface SilenceCandidate {
+  id: string
+  start: number
+  end: number
+  selected: boolean
+}
+
+export interface SilencePreview {
+  trackId: string
+  clipId: string
+  candidates: SilenceCandidate[]
+}
+
 export interface EditorState {
   project: Project
   past: HistoryEntry[]
@@ -29,6 +43,8 @@ export interface EditorState {
   projectPath: string | null // 현재 프로젝트 파일 경로 (6.1)
   savedRevision: number // 마지막 저장 시점의 히스토리 길이 (더티 판정)
   sttProgress: { active: boolean; phase: string; percent: number; cancel?: () => void } | null // 자동 자막 (3.2)
+  silenceProgress: { active: boolean; percent: number; cancel?: () => void } | null // 무음 감지 진행 중
+  silencePreview: SilencePreview | null // 무음 감지 결과 미리보기(적용 전) — 히스토리 비대상
 
   dispatch(label: string, fn: (p: Project) => Project): void
   undo(): void
@@ -44,6 +60,9 @@ export interface EditorState {
   setProjectPath(path: string | null): void
   markSaved(): void
   setSttProgress(p: EditorState['sttProgress']): void
+  setSilenceProgress(p: EditorState['silenceProgress']): void
+  setSilencePreview(p: SilencePreview | null): void
+  toggleSilenceCandidate(id: string): void
 }
 
 const MAX_HISTORY = 200
@@ -62,6 +81,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   projectPath: null,
   savedRevision: 0,
   sttProgress: null,
+  silenceProgress: null,
+  silencePreview: null,
 
   dispatch(label, fn) {
     const before = get().project
@@ -107,7 +128,19 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
   setProjectPath: (path) => set({ projectPath: path }),
   markSaved: () => set((s) => ({ savedRevision: s.past.length })),
-  setSttProgress: (p) => set({ sttProgress: p })
+  setSttProgress: (p) => set({ sttProgress: p }),
+  setSilenceProgress: (p) => set({ silenceProgress: p }),
+  setSilencePreview: (p) => set({ silencePreview: p }),
+  toggleSilenceCandidate: (id) =>
+    set((s) => {
+      if (!s.silencePreview) return {}
+      return {
+        silencePreview: {
+          ...s.silencePreview,
+          candidates: s.silencePreview.candidates.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c))
+        }
+      }
+    })
 }))
 
 /** 프로젝트 직렬화 (1.1.4) */

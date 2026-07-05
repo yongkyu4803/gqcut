@@ -5,7 +5,7 @@ import { Inspector } from './components/Inspector'
 import { TransportBar } from './components/TransportBar'
 import { Timeline } from './components/Timeline'
 import { useEditor, serializeProject, deserializeProject } from './state/store'
-import { findClip, removeClip, addClip, splitClip } from './state/commands'
+import { findClip, removeClip, addClip, splitClip, mergeClip } from './state/commands'
 import { genId } from '@shared/model/factory'
 import type { Clip } from '@shared/model/types'
 import { playback } from './engine/playback'
@@ -16,6 +16,7 @@ let clipboard: Clip | null = null
 export default function App(): React.JSX.Element {
   const exportProgress = useEditor((s) => s.exportProgress)
   const sttProgress = useEditor((s) => s.sttProgress)
+  const silenceProgress = useEditor((s) => s.silenceProgress)
 
   // 전역 단축키 (1.2.6)
   useEffect(() => {
@@ -28,7 +29,7 @@ export default function App(): React.JSX.Element {
       if (e.code === 'Space') {
         e.preventDefault()
         void playback.toggle()
-      } else if (mod && e.key === 'z' && !e.shiftKey) {
+      } else if ((mod && e.key === 'z' && !e.shiftKey) || (e.key === 'r' && !mod)) {
         e.preventDefault()
         s.undo()
         playback.refresh()
@@ -41,9 +42,12 @@ export default function App(): React.JSX.Element {
         const id = s.selectedClipId
         s.dispatch('클립 삭제', (p) => removeClip(p, id))
         s.select(null)
-      } else if (e.key === 's' && !mod && s.selectedClipId) {
+      } else if ((e.key === 's' || e.key === 'c') && !mod && s.selectedClipId) {
         const id = s.selectedClipId
         s.dispatch('클립 분할', (p) => splitClip(p, id, s.playhead, genId('clip')))
+      } else if (e.key === 'm' && !mod && s.selectedClipId) {
+        const id = s.selectedClipId
+        s.dispatch('컷 병합', (p) => mergeClip(p, id))
       } else if (mod && e.key === 'c' && s.selectedClipId) {
         const found = findClip(s.project, s.selectedClipId)
         if (found) clipboard = found.clip
@@ -140,6 +144,20 @@ export default function App(): React.JSX.Element {
               <div className="progress-fill" style={{ width: `${sttProgress.percent}%` }} />
             </div>
             <button className="btn" onClick={() => sttProgress.cancel?.()}>
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      {silenceProgress?.active && (
+        <div className="export-overlay" data-testid="silence-overlay">
+          <div className="export-dialog">
+            <h3>무음 감지 중…</h3>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${silenceProgress.percent}%` }} />
+            </div>
+            <button className="btn" onClick={() => silenceProgress.cancel?.()}>
               취소
             </button>
           </div>

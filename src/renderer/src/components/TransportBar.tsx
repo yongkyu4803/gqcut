@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { createProject, createTextClip, genId } from '@shared/model/factory'
 import { formatTimecode } from '@shared/time'
 import { useEditor, serializeProject, deserializeProject } from '@renderer/state/store'
-import { addClip, projectDuration, splitClip } from '@renderer/state/commands'
+import { addClip, canMergeClip, projectDuration, splitClip, mergeClip } from '@renderer/state/commands'
 import { playback } from '@renderer/engine/playback'
 import { exportTimeline, type ExportSettings } from '@renderer/engine/exporter'
 import { ExportDialog } from './ExportDialog'
@@ -24,6 +24,12 @@ export function TransportBar(): React.JSX.Element {
     if (!selectedClipId) return
     dispatch('클립 분할', (p) => splitClip(p, selectedClipId, playhead, genId('clip')))
   }
+
+  const merge = (): void => {
+    if (!selectedClipId) return
+    dispatch('컷 병합', (p) => mergeClip(p, selectedClipId))
+  }
+  const mergeable = selectedClipId ? canMergeClip(project, selectedClipId) : false
 
   const addText = (): void => {
     const track = project.tracks.find((t) => t.kind === 'text')
@@ -101,7 +107,7 @@ export function TransportBar(): React.JSX.Element {
         저장
       </button>
       <span className="sep" />
-      <button className="btn" disabled={past.length === 0} onClick={undo} title="⌘Z">
+      <button className="btn" disabled={past.length === 0} onClick={undo} title="R / ⌘Z">
         ↩ 실행취소
       </button>
       <button className="btn" disabled={future.length === 0} onClick={redo} title="⇧⌘Z">
@@ -115,8 +121,11 @@ export function TransportBar(): React.JSX.Element {
         {formatTimecode(playhead, project.settings.fps)} / {formatTimecode(projectDuration(project), project.settings.fps)}
       </span>
       <span className="sep" />
-      <button className="btn" data-testid="split-btn" disabled={!selectedClipId} onClick={split} title="S">
+      <button className="btn" data-testid="split-btn" disabled={!selectedClipId} onClick={split} title="C / S">
         ✂ 분할
+      </button>
+      <button className="btn" data-testid="merge-btn" disabled={!mergeable} onClick={merge} title="M">
+        ⛓ 병합
       </button>
       <button className="btn" data-testid="add-text-btn" onClick={addText}>
         T 텍스트

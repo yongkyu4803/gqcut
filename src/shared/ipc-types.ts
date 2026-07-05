@@ -3,6 +3,7 @@
  * preload 가 이 시그니처대로 contextBridge 에 노출한다.
  */
 import type { SttSegment } from './subtitles'
+import type { SilenceInterval } from './silence'
 
 export interface SttTranscribeOptions {
   jobId: string
@@ -25,6 +26,29 @@ export interface SttProgressEvent {
 export interface SttResult {
   ok: boolean
   segments?: SttSegment[]
+  error?: string
+}
+
+export interface SilenceDetectOptions {
+  jobId: string
+  sourcePath: string
+  sourceIn: number
+  sourceOut: number
+  /** dBFS 임계치 (예: -35) — 이보다 조용하면 무음으로 판정 */
+  noiseDb: number
+  /** 이 길이(초) 이상 지속돼야 무음 구간으로 인정 */
+  minDurationSec: number
+}
+
+export interface SilenceProgressEvent {
+  jobId: string
+  phase: 'analyze' | 'done'
+  percent: number
+}
+
+export interface SilenceResult {
+  ok: boolean
+  intervals?: SilenceInterval[]
   error?: string
 }
 
@@ -117,6 +141,11 @@ export interface EditorApi {
   onSttProgress(cb: (p: SttProgressEvent) => void): () => void
   /** SRT 파일 저장 다이얼로그 */
   saveSrtDialog(defaultName: string, content: string): Promise<string | null>
+
+  /** 무음 감지: 클립 소스 구간에서 ffmpeg silencedetect 실행 → 무음 구간 목록. 진행률은 onSilenceProgress */
+  silenceDetect(opts: SilenceDetectOptions): Promise<SilenceResult>
+  silenceCancel(jobId: string): Promise<void>
+  onSilenceProgress(cb: (p: SilenceProgressEvent) => void): () => void
 
   /** e2e 전용: 파일 경로 직접 임포트 (다이얼로그 우회) */
   fileExists(path: string): Promise<boolean>
