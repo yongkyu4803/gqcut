@@ -228,6 +228,18 @@ export function mergeClip(p: Project, clipId: string): Project {
   }))
 }
 
+/**
+ * 컷 구간을 프레임 그리드로 스냅 + 재병합.
+ * 제거량을 프레임 배수로 만들어, 리플 후 클립 경계가 프레임 정렬되고 남은 survivor 의
+ * (타임라인 길이)·speed 와 (소스 길이)가 정확히 일치(불변식 3)하도록 하는 전제.
+ */
+function snapRangesToFrame(merged: Array<[number, number]>, fps: number): Array<[number, number]> {
+  const snapped = merged
+    .map(([s, e]): [number, number] => [snapToFrame(s, fps), snapToFrame(e, fps)])
+    .filter(([s, e]) => e - s > 1e-9)
+  return mergeRanges(snapped)
+}
+
 /** 트랙 클립 배열을 병합된 삭제 구간 기준으로 재구성한다 — 전환 해제 + survivor 분할 + remap 적용 (순수 배열 변환) */
 function rippleSpliceClips(clips: Clip[], merged: Array<[number, number]>, remap: (t: number) => number, fps: number): Clip[] {
   const sorted = sortClips(clips)
@@ -272,23 +284,28 @@ function rippleSpliceClips(clips: Clip[], merged: Array<[number, number]>, remap
     if (kept.length === 0) continue // 클립 전체가 삭제 구간에 덮임
 
     const speed = clip.speed ?? 1
+    const hasSource = clip.sourceIn !== undefined && clip.kind !== 'image'
+    let emitted = 0
     kept.forEach(([segStart, segEnd], i) => {
+      const tlStart = snapToFrame(remap(segStart), fps)
+      const tlEnd = snapToFrame(remap(segEnd), fps)
+      // 스냅 후 1프레임 미만이면 버린다 — 0길이 클립(불변식 2 위반) 방지
+      if (tlEnd - tlStart < minLen - 1e-6) return
       const isFirst = i === 0 && Math.abs(segStart - clip.timelineStart) < 1e-6
       const isLast = i === kept.length - 1 && Math.abs(segEnd - clip.timelineEnd) < 1e-6
+      // sourceIn 은 survivor 시작의 실제 소스 위치, sourceOut 은 스냅된 타임라인 길이에서 역산 →
+      // sourceOut-sourceIn == (tlEnd-tlStart)·speed 가 항상 성립(불변식 3). 프레임 비정렬 무음 경계에서도 안전.
+      const sourceIn = hasSource ? clip.sourceIn! + (segStart - clip.timelineStart) * speed : undefined
       rebuilt.push({
         ...clip,
-        id: i === 0 ? clip.id : genId('clip'),
-        timelineStart: snapToFrame(remap(segStart), fps),
-        timelineEnd: snapToFrame(remap(segEnd), fps),
-        ...(clip.sourceIn !== undefined && clip.kind !== 'image'
-          ? {
-              sourceIn: clip.sourceIn + (segStart - clip.timelineStart) * speed,
-              sourceOut: clip.sourceIn + (segEnd - clip.timelineStart) * speed
-            }
-          : {}),
+        id: emitted === 0 ? clip.id : genId('clip'),
+        timelineStart: tlStart,
+        timelineEnd: tlEnd,
+        ...(hasSource ? { sourceIn, sourceOut: sourceIn! + (tlEnd - tlStart) * speed } : {}),
         transitionIn: isFirst ? clip.transitionIn : undefined,
         transitionOut: isLast ? clip.transitionOut : undefined
       })
+      emitted++
     })
   }
   return rebuilt
@@ -311,7 +328,7 @@ function shiftClips(clips: Clip[], remap: (t: number) => number): Clip[] {
 export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[number, number]>): Project {
   const track = p.tracks.find((t) => t.id === trackId)
   if (!track) return p
-  const merged = mergeRanges(ranges)
+  const merged = snapRangesToFrame(mergeRanges(ranges), p.settings.fps)
   if (merged.length === 0) return p
   const remap = buildRippleRemap(merged)
   const rebuilt = rippleSpliceClips(track.clips, merged, remap, p.settings.fps)
@@ -323,10 +340,10 @@ export function rippleDeleteRanges(p: Project, trackId: string, ranges: Array<[n
  * 오디오 트랙(배경음악 등 연속 재생 콘텐츠)은 잘라내지 않고 위치만 밀어 글리치를 피한다.
  */
 export function rippleDeleteRangesAllTracks(p: Project, ranges: Array<[number, number]>): Project {
-  const merged = mergeRanges(ranges)
+  const fps = p.settings.fps
+  const merged = snapRangesToFrame(mergeRanges(ranges), fps)
   if (merged.length === 0) return p
   const remap = buildRippleRemap(merged)
-  const fps = p.settings.fps
 
   const newTracks = p.tracks.map((t) =>
     t.kind === 'audio'

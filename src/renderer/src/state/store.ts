@@ -93,10 +93,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     const after = fn(before)
     if (after === before) return
     if (import.meta.env.DEV) assertInvariants(after, label)
+    // 프로젝트가 바뀌면 무음 미리보기 좌표가 낡으므로 무효화 (감지 후 편집 → 엉뚱한 구간 컷 방지)
     set((s) => ({
       project: after,
       past: [...s.past.slice(-MAX_HISTORY + 1), { label, before, after }],
-      future: []
+      future: [],
+      silencePreview: null
     }))
   },
 
@@ -104,18 +106,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { past } = get()
     if (past.length === 0) return
     const entry = past[past.length - 1]
-    set((s) => ({ project: entry.before, past: s.past.slice(0, -1), future: [entry, ...s.future] }))
+    set((s) => ({ project: entry.before, past: s.past.slice(0, -1), future: [entry, ...s.future], silencePreview: null }))
   },
 
   redo() {
     const { future } = get()
     if (future.length === 0) return
     const entry = future[0]
-    set((s) => ({ project: entry.after, past: [...s.past, entry], future: s.future.slice(1) }))
+    set((s) => ({ project: entry.after, past: [...s.past, entry], future: s.future.slice(1), silencePreview: null }))
   },
 
   replaceProject(p) {
-    set({ project: p, past: [], future: [], selectedClipId: null, playhead: 0, savedRevision: 0 })
+    set({ project: p, past: [], future: [], selectedClipId: null, playhead: 0, savedRevision: 0, silencePreview: null })
   },
 
   select: (clipId) => set({ selectedClipId: clipId }),

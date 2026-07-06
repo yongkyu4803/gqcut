@@ -228,6 +228,42 @@ describe('무음 리플 삭제 (rippleDeleteRanges)', () => {
     expect(checkInvariants(result)).toHaveLength(0)
   })
 
+  it('프레임 비정렬 무음 경계에서도 불변식이 유지된다 (프레임 스냅 회귀)', () => {
+    const { p, trackId } = setup() // 비디오 [0,10], 30fps
+    // ffmpeg 무음 경계는 프레임 정렬이 아니다 — 스냅 후에도 sourceLen == tlLen·speed (불변식 3) 가 깨지면 안 됨
+    const result = rippleDeleteRanges(p, trackId, [[1.05, 2.05]])
+    expect(checkInvariants(result)).toHaveLength(0)
+    const clips = result.tracks.find((t) => t.id === trackId)!.clips
+    const fps = result.settings.fps
+    for (const c of clips) {
+      expect(c.timelineStart * fps).toBeCloseTo(Math.round(c.timelineStart * fps), 6) // 프레임 정렬
+      expect(c.timelineEnd * fps).toBeCloseTo(Math.round(c.timelineEnd * fps), 6)
+      if (c.sourceIn !== undefined && c.sourceOut !== undefined) {
+        expect(c.sourceOut - c.sourceIn).toBeCloseTo(c.timelineEnd - c.timelineStart, 6) // 불변식 3 (speed=1)
+      }
+    }
+  })
+
+  it('프레임 비정렬 + 배속 클립에서도 불변식 3 유지', () => {
+    let { p, clipId, trackId } = setup()
+    p = updateClip(p, clipId, { speed: 2, timelineEnd: 5, sourceOut: 10 }) // 2배속: 타임라인 5초 = 소스 10초
+    expect(checkInvariants(p)).toHaveLength(0)
+    const result = rippleDeleteRanges(p, trackId, [[1.05, 1.55]])
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
+  it('비프레임정렬 클립 duration(임포트 영상)에서 프레임 정렬 컷을 해도 불변식 3 유지', () => {
+    // 소수 duration(30fps 로 나눠떨어지지 않음) → 클립 끝 survivor 의 sourceOut 을 스냅된 길이에서 역산해야 안전
+    let p = createProject()
+    const asset = makeAsset(10.04)
+    p = addAsset(p, asset)
+    const track = p.tracks.find((t) => t.kind === 'video')!
+    const clip = createMediaClip(asset, 0) // [0, 10.04]
+    p = addClip(p, track.id, clip)
+    const result = rippleDeleteRanges(p, track.id, [[2, 3]])
+    expect(checkInvariants(result)).toHaveLength(0)
+  })
+
   it('전환 구간과 겹치는 무음은 전환을 제거하고, 겹치지 않는 무음은 유지한다 (불변식 4/6/7)', () => {
     const { p, trackId, assetId, clipId } = setup()
     const asset = p.assets.find((a) => a.id === assetId)!
