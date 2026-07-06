@@ -119,7 +119,7 @@ export class Compositor {
       this.uni[name] = gl.getUniformLocation(this.layerProg, name)!
     }
     gl.useProgram(this.transProg)
-    for (const name of ['uMatrix', 'uTexA', 'uTexB', 'uProgress', 'uType']) {
+    for (const name of ['uMatrix', 'uTexA', 'uTexB', 'uProgress', 'uType', 'uAspect']) {
       this.tUni[name] = gl.getUniformLocation(this.transProg, name)!
     }
 
@@ -212,6 +212,7 @@ export class Compositor {
     gl.uniform1i(this.tUni.uTexB, 1)
     gl.uniform1f(this.tUni.uProgress, item.progress)
     gl.uniform1i(this.tUni.uType, transitionTypeId(item.type))
+    gl.uniform1f(this.tUni.uAspect, this.height > 0 ? this.width / this.height : 1)
     // 풀스크린: y 반전 없는 스케일-2 행렬 (FBO 의 v=1 이 화면 상단과 일치)
     gl.uniformMatrix3fv(this.tUni.uMatrix, false, new Float32Array([2, 0, 0, 0, 2, 0, 0, 0, 1]))
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)

@@ -2,7 +2,7 @@
  * effects-spec 유닛 테스트 (4.1/4.2) — 파라미터 해석과 전환 시간 의미론.
  */
 import { describe, expect, it } from 'vitest'
-import { fadeOpacityMul, isNeutral, NEUTRAL_ADJUST, resolveColorAdjust, transitionTypeId, transitionZone } from '@shared/effects-spec'
+import { fadeOpacityMul, isNeutral, NEUTRAL_ADJUST, resolveColorAdjust, TRANSITION_TYPES, transitionTypeId, transitionZone } from '@shared/effects-spec'
 
 describe('resolveColorAdjust (4.1)', () => {
   it('빈/미지정 effects 는 중립값', () => {
@@ -65,10 +65,21 @@ describe('transitionZone (4.2, DATA-MODEL §1.1)', () => {
     expect(transitionZone(2, 1, 0, 2.3)).toEqual({ start: 1.5, end: 2.3 })
   })
 
-  it('전환 타입 → 셰이더 id', () => {
+  it('전환 타입 → 셰이더 id (8종, 셰이더 uType 분기와 1:1)', () => {
     expect(transitionTypeId('dissolve')).toBe(0)
-    expect(transitionTypeId('fade')).toBe(0)
+    expect(transitionTypeId('fade')).toBe(0) // 레거시 별칭 → dissolve
     expect(transitionTypeId('wipe')).toBe(1)
     expect(transitionTypeId('slide')).toBe(2)
+    expect(transitionTypeId('dip')).toBe(3)
+    expect(transitionTypeId('iris')).toBe(4)
+    expect(transitionTypeId('zoom')).toBe(5)
+    expect(transitionTypeId('radial')).toBe(6)
+    expect(transitionTypeId('blinds')).toBe(7)
+  })
+
+  it('TRANSITION_TYPES 는 8종이고 모든 type 이 고유 id 로 매핑된다', () => {
+    expect(TRANSITION_TYPES).toHaveLength(8)
+    const ids = TRANSITION_TYPES.map((t) => transitionTypeId(t.type))
+    expect(new Set(ids).size).toBe(8) // 중복 매핑 없음
   })
 })

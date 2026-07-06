@@ -78,16 +78,31 @@ vec3 applyColorAdjust(vec3 rgb, float uBrightness, float uContrast, float uSatur
 export const TRANSITION_TYPES = [
   { type: 'dissolve', label: '디졸브' },
   { type: 'wipe', label: '와이프' },
-  { type: 'slide', label: '슬라이드' }
+  { type: 'slide', label: '슬라이드' },
+  { type: 'dip', label: '페이드(암전)' },
+  { type: 'iris', label: '원형' },
+  { type: 'zoom', label: '줌' },
+  { type: 'radial', label: '시계 와이프' },
+  { type: 'blinds', label: '블라인드' }
 ] as const
 
-/** 전환 셰이더의 type uniform 값 매핑 */
+/** 전환 셰이더의 type uniform 값 매핑 (셰이더 uType 분기와 1:1) */
 export function transitionTypeId(type: Transition['type']): number {
   switch (type) {
     case 'wipe':
       return 1
     case 'slide':
       return 2
+    case 'dip':
+      return 3
+    case 'iris':
+      return 4
+    case 'zoom':
+      return 5
+    case 'radial':
+      return 6
+    case 'blinds':
+      return 7
     default:
       return 0 // dissolve (fade 포함)
   }
@@ -103,12 +118,15 @@ varying vec2 vUV;
 uniform sampler2D uTexA;
 uniform sampler2D uTexB;
 uniform float uProgress;
+uniform float uAspect; // 캔버스 종횡비(w/h) — 원형/시계 전환의 정원 보정
 uniform int uType;
+
+const float TAU = 6.2831853;
 
 void main() {
   float p = clamp(uProgress, 0.0, 1.0);
   if (uType == 1) {
-    // wipe: 왼쪽→오른쪽 경계 이동 (부드러운 8% 에지)
+    // wipe: 왼쪽→오른쪽 경계 이동 (부드러운 에지)
     float edge = smoothstep(p - 0.04, p + 0.04, vUV.x);
     gl_FragColor = mix(texture2D(uTexB, vUV), texture2D(uTexA, vUV), edge);
   } else if (uType == 2) {
@@ -119,8 +137,40 @@ void main() {
     vec4 a = (uvA.x <= 1.0) ? texture2D(uTexA, uvA) : vec4(0.0);
     vec4 b = inB ? texture2D(uTexB, uvB) : vec4(0.0);
     gl_FragColor = inB ? b : a;
+  } else if (uType == 3) {
+    // dip: A → 암전 → B (전반부 A→검정, 후반부 검정→B)
+    vec4 black = vec4(0.0, 0.0, 0.0, 1.0);
+    if (p < 0.5) gl_FragColor = mix(texture2D(uTexA, vUV), black, p * 2.0);
+    else gl_FragColor = mix(black, texture2D(uTexB, vUV), (p - 0.5) * 2.0);
+  } else if (uType == 4) {
+    // iris: 중심에서 원이 커지며 B 공개 (aspect 보정으로 정원)
+    vec2 c = vUV - 0.5;
+    c.x *= uAspect;
+    float maxR = length(vec2(0.5 * uAspect, 0.5));
+    float radius = p * maxR * 1.05;
+    float m = smoothstep(radius - 0.02 * maxR, radius + 0.02 * maxR, length(c));
+    gl_FragColor = mix(texture2D(uTexB, vUV), texture2D(uTexA, vUV), m);
+  } else if (uType == 5) {
+    // zoom: B 가 작게 시작해 확대되며 크로스페이드 (가장자리는 clamp 로 확장 → 투명 테두리 없음)
+    float s = mix(0.5, 1.0, p);
+    vec2 uvB = clamp((vUV - 0.5) / s + 0.5, 0.0, 1.0);
+    gl_FragColor = mix(texture2D(uTexA, vUV), texture2D(uTexB, uvB), smoothstep(0.0, 1.0, p));
+  } else if (uType == 6) {
+    // radial(시계 와이프): 상단(12시)에서 시계방향으로 각도 스윕
+    // 전환 패스 FBO 는 vUV.y 가 상단=1 이므로 atan(c.x, c.y) 로 상단을 0 각으로 잡는다
+    vec2 c = vUV - 0.5;
+    c.x *= uAspect;
+    float ang = atan(c.x, c.y);       // 상단 0
+    float norm = mod(ang, TAU) / TAU; // 0..1 시계방향
+    float m = smoothstep(p - 0.01, p + 0.01, norm);
+    gl_FragColor = mix(texture2D(uTexB, vUV), texture2D(uTexA, vUV), m);
+  } else if (uType == 7) {
+    // blinds: 가로 줄무늬 8개가 동시에 열리며 B 공개
+    float local = fract(vUV.y * 8.0);
+    float m = smoothstep(p - 0.03, p + 0.03, local);
+    gl_FragColor = mix(texture2D(uTexB, vUV), texture2D(uTexA, vUV), m);
   } else {
-    // dissolve
+    // dissolve (crossfade)
     gl_FragColor = mix(texture2D(uTexA, vUV), texture2D(uTexB, vUV), p);
   }
 }
