@@ -110,15 +110,37 @@ export interface TextContent {
   align: 'left' | 'center' | 'right'
   bold?: boolean
   italic?: boolean
+  letterSpacing?: number // px (기본 0)
+  lineHeight?: number // 배수 (기본 1.25)
+  /** 글자색 그라디언트 — 지정 시 color 대신 사용 */
+  gradient?: { from: string; to: string; horizontal?: boolean }
+  /** 네온 글로우 — strength 는 블러 반경(px) */
+  glow?: { color: string; strength: number }
   stroke?: { color: string; width: number }
   shadow?: { color: string; blur: number; x: number; y: number }
-  background?: { color: string; padding: number }
+  background?: { color: string; padding: number; radius?: number }
+  /** 형광펜 하이라이트 — 줄 단위 박스 (배경 박스와 별개) */
+  highlight?: { color: string; padding?: number }
   animationIn?: TextAnimation
   animationOut?: TextAnimation
+  /** 지속 루프 애니메이션 (shake/pulse/float) — duration 은 주기(초) */
+  loop?: TextAnimation
 }
 
 export interface TextAnimation {
-  type: 'fade' | 'slide' | 'pop' | (string & {})
-  duration: number // 초
+  type:
+    | 'fade'
+    | 'slide' // 아래에서 등장
+    | 'slide-down' // 위에서 등장
+    | 'slide-left' // 왼쪽에서 등장
+    | 'slide-right' // 오른쪽에서 등장
+    | 'pop'
+    | 'zoom'
+    | 'typewriter'
+    | 'shake' // 루프 전용
+    | 'pulse'
+    | 'float'
+    | (string & {})
+  duration: number // 초 (루프면 주기)
   params?: Record<string, number>
 }

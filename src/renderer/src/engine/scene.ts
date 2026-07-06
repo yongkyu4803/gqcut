@@ -54,8 +54,12 @@ function findTransitionAt(track: Track, t: number): TransitionAt | null {
 
 function textLayer(clip: Clip, t: number): Layer | null {
   if (!clip.text) return null
-  const raster = rasterizeText(clip.text)
   const anim = textAnimState(clip, t)
+  // 타이프라이터: 가시 비율 → 글자 수. 0글자면 레이어 생략 (빈 배경 박스 방지)
+  const totalChars = clip.text.value.length
+  const visibleChars = anim.visibleRatio >= 1 ? undefined : Math.round(anim.visibleRatio * totalChars)
+  if (visibleChars !== undefined && visibleChars <= 0) return null
+  const raster = rasterizeText(clip.text, visibleChars)
   const tr = clip.transform ?? { x: 0, y: 0, scale: 1, rotation: 0 }
   return {
     source: raster.canvas,

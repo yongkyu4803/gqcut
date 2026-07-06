@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
+import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
 import { formatTimecode } from '@shared/time'
 import { useEditor, type SilenceScope } from '@renderer/state/store'
 import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
@@ -388,8 +389,13 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
         >
           <option value="none">없음</option>
           <option value="fade">페이드</option>
-          <option value="slide">슬라이드</option>
+          <option value="slide">슬라이드 ↑</option>
+          <option value="slide-down">슬라이드 ↓</option>
+          <option value="slide-left">슬라이드 →</option>
+          <option value="slide-right">슬라이드 ←</option>
           <option value="pop">팝</option>
+          <option value="zoom">줌</option>
+          <option value="typewriter">타이프라이터</option>
         </select>
         {anim && (
           <input
@@ -408,6 +414,25 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
   return (
     <>
       <h4>텍스트</h4>
+      <Row label="프리셋">
+        <select
+          data-testid="text-preset"
+          value=""
+          onChange={(e) => {
+            const preset = TEXT_PRESETS.find((p) => p.id === e.target.value)
+            if (preset) onSet(`프리셋: ${preset.label}`, { text: applyTextPreset(text, preset) })
+          }}
+        >
+          <option value="" disabled>
+            스타일 선택…
+          </option>
+          {TEXT_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </Row>
       <textarea className="text-input" data-testid="text-value" value={text.value} rows={2} onChange={(e) => setText('텍스트 내용', { value: e.target.value })} />
       <Row label="폰트">
         <select data-testid="text-font" value={text.fontFamily} onChange={(e) => setText('폰트', { fontFamily: e.target.value })}>
@@ -440,6 +465,62 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
           I
         </button>
       </Row>
+      <Row label="자간(px)">
+        <input type="number" step={0.5} value={text.letterSpacing ?? 0} onChange={(e) => setText('자간', { letterSpacing: Number(e.target.value) })} />
+      </Row>
+      <Row label="행간(배)">
+        <input
+          type="number"
+          min={0.8}
+          max={3}
+          step={0.05}
+          value={text.lineHeight ?? 1.25}
+          onChange={(e) => setText('행간', { lineHeight: Math.max(0.8, Number(e.target.value)) })}
+        />
+      </Row>
+      <Row label="그라디언트">
+        <input
+          type="checkbox"
+          checked={!!text.gradient}
+          onChange={(e) => setText('그라디언트', { gradient: e.target.checked ? { from: '#fff173', to: '#ff9a3d' } : undefined })}
+        />
+        {text.gradient && (
+          <>
+            <input type="color" value={text.gradient.from} onChange={(e) => setText('그라디언트 시작색', { gradient: { ...text.gradient!, from: e.target.value } })} />
+            <input type="color" value={text.gradient.to} onChange={(e) => setText('그라디언트 끝색', { gradient: { ...text.gradient!, to: e.target.value } })} />
+          </>
+        )}
+      </Row>
+      <Row label="글로우">
+        <input
+          type="checkbox"
+          checked={!!text.glow}
+          onChange={(e) => setText('글로우', { glow: e.target.checked ? { color: '#31d7ff', strength: 20 } : undefined })}
+        />
+        {text.glow && (
+          <>
+            <input type="color" value={text.glow.color} onChange={(e) => setText('글로우 색', { glow: { ...text.glow!, color: e.target.value } })} />
+            <input
+              type="number"
+              min={2}
+              max={60}
+              value={text.glow.strength}
+              style={{ width: 52 }}
+              onChange={(e) => setText('글로우 강도', { glow: { ...text.glow!, strength: Math.max(2, Number(e.target.value)) } })}
+            />
+          </>
+        )}
+      </Row>
+      <Row label="형광펜">
+        <input
+          type="checkbox"
+          checked={!!text.highlight}
+          onChange={(e) => setText('형광펜', { highlight: e.target.checked ? { color: '#ffe14d', padding: 6 } : undefined })}
+        />
+        {text.highlight && (
+          <input type="color" value={text.highlight.color} onChange={(e) => setText('형광펜 색', { highlight: { ...text.highlight!, color: e.target.value } })} />
+        )}
+      </Row>
       <Row label="외곽선">
         <input
           type="number"
@@ -461,12 +542,57 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
         <input
           type="checkbox"
           checked={!!text.background}
-          onChange={(e) => setText('배경 박스', { background: e.target.checked ? { color: 'rgba(0,0,0,0.55)', padding: 16 } : undefined })}
+          onChange={(e) => setText('배경 박스', { background: e.target.checked ? { color: 'rgba(0,0,0,0.55)', padding: 16, radius: 12 } : undefined })}
         />
+        {text.background && (
+          <>
+            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>라운드</span>
+            <input
+              type="number"
+              min={0}
+              max={60}
+              value={text.background.radius ?? 0}
+              style={{ width: 52 }}
+              onChange={(e) => setText('배경 라운드', { background: { ...text.background!, radius: Math.max(0, Number(e.target.value)) } })}
+            />
+          </>
+        )}
       </Row>
       <h4>애니메이션</h4>
       {animRow('animationIn', '등장')}
       {animRow('animationOut', '퇴장')}
+      <Row label="루프">
+        <select
+          value={text.loop?.type ?? 'none'}
+          onChange={(e) => {
+            const type = e.target.value
+            setText('루프 애니메이션', {
+              loop: type === 'none' ? undefined : ({ type, duration: text.loop?.duration ?? 1.2, params: text.loop?.params } as TextAnimation)
+            })
+          }}
+        >
+          <option value="none">없음</option>
+          <option value="shake">흔들림</option>
+          <option value="pulse">펄스</option>
+          <option value="float">둥실</option>
+        </select>
+        {text.loop && (
+          <>
+            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>강도</span>
+            <input
+              type="number"
+              min={0.2}
+              max={3}
+              step={0.1}
+              value={text.loop.params?.intensity ?? 1}
+              style={{ width: 52 }}
+              onChange={(e) =>
+                setText('루프 강도', { loop: { ...text.loop!, params: { ...text.loop!.params, intensity: Math.max(0.2, Number(e.target.value)) } } })
+              }
+            />
+          </>
+        )}
+      </Row>
     </>
   )
 }
