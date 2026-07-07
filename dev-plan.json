@@ -17,7 +17,7 @@
     "corePrinciple": "프리뷰 엔진(WebCodecs+WebGL, 실시간)과 내보내기 엔진(FFmpeg, 오프라인)을 분리하되, 이펙트/합성 결과는 양쪽이 동일해야 한다(WYSIWYG). WYSIWYG 판정은 정성 비교가 아니라 수치 기준(기준 프레임 SSIM)으로 한다.",
     "revisionNotes": "v0.2.0 (2026-07-02): (1) WebGL 컴포지터를 Phase 4에서 Phase 1.3으로 전진(Canvas2D→WebGL 재작업 제거), (2) 내보내기 파이프라인 스파이크를 Phase 1.5로 전진(WYSIWYG 구조 리스크 조기 검증), (3) 최소 오디오 재생을 1.4(A/V 싱크)에 포함(Phase 2 의존성 역전 해소), (4) 코덱 호환성 fallback을 Phase 0.4로 승격 + VFR 감지를 0.2에 추가, (5) 품질 기준 수치화(SSIM/내보내기 속도), (6) 초기 내보내기 프리셋 H.264+AAC 한정, (7) e2e 스모크(1.6)와 CI 게이트(0.1.6) 추가.",
     "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다.",
-    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토. | 자동 자막(3.2) 구현 (2026-07-03): 엔진은 계획의 whisper.cpp 대신 @huggingface/transformers(Whisper ONNX)+onnxruntime-node 로 확정 — Electron main 에서 N-API 로 로드됨을 실측(base 한국어 정확 전사). 클립 소스구간 16kHz 추출→ASR(타임스탬프)→소스/타임라인 변환→자막 트랙 일괄 배치(단일 undo)→SRT 내보내기. 유닛 46개(자막 순수로직 9), 실제 앱에서 음성영상→자막2개 생성·프리뷰 렌더 확인. e2e/stt.spec.ts 는 RUN_STT_E2E 로 gated(모델 다운로드 무거움). 미검증: 다양한 음성/장편 정확도(육안), 패키징 후 onnxruntime asar 언팩 동작. | 무음 자동 컷(1.7, 선택) 계획 수립 (2026-07-03): FFmpeg silencedetect 로 소스 무음 감지 → 소스/타임라인 변환(패딩·병합) → 신규 ripple-delete 프리미티브로 구간 제거+이어붙이기(all-tracks 싱크 유지 기본). 파괴적이므로 리뷰 단계 필수. 미구현 — 계획만. | AI 편집 어시스턴트(phase-7) 계획 수립 (2026-07-08): 순수 커맨드 레이어를 Claude tool-use 도구(~18종)로 노출, 메인=safeStorage 키+API 프록시 / 렌더러=에이전트 루프+executor(1툴콜=1undo, 턴 롤백). computer-use(좌표 클릭)와 codegen-eval 은 기각. 검증은 모의 LLM 픽스처(CI 그린) + RUN_AI_E2E gated 실호출. 미구현 — 계획만."
+    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토. | 자동 자막(3.2) 구현 (2026-07-03): 엔진은 계획의 whisper.cpp 대신 @huggingface/transformers(Whisper ONNX)+onnxruntime-node 로 확정 — Electron main 에서 N-API 로 로드됨을 실측(base 한국어 정확 전사). 클립 소스구간 16kHz 추출→ASR(타임스탬프)→소스/타임라인 변환→자막 트랙 일괄 배치(단일 undo)→SRT 내보내기. 유닛 46개(자막 순수로직 9), 실제 앱에서 음성영상→자막2개 생성·프리뷰 렌더 확인. e2e/stt.spec.ts 는 RUN_STT_E2E 로 gated(모델 다운로드 무거움). 미검증: 다양한 음성/장편 정확도(육안), 패키징 후 onnxruntime asar 언팩 동작. | 무음 자동 컷(1.7, 선택) 계획 수립 (2026-07-03): FFmpeg silencedetect 로 소스 무음 감지 → 소스/타임라인 변환(패딩·병합) → 신규 ripple-delete 프리미티브로 구간 제거+이어붙이기(all-tracks 싱크 유지 기본). 파괴적이므로 리뷰 단계 필수. 미구현 — 계획만. | AI 편집 어시스턴트(phase-7) 계획 수립 (2026-07-08): 순수 커맨드 레이어를 Claude tool-use 도구(~18종)로 노출, 백엔드=Claude Agent SDK(로컬 Claude Code 구독 인증 상속, API 키 불필요·직접 OAuth 토큰 재사용은 ToS 위반이라 기각) / 렌더러=executor(1툴콜=1undo, 턴 롤백), 배포 시 API 키 프로바이더 추가 여지. computer-use(좌표 클릭)와 codegen-eval 은 기각. 검증은 모의 LLM 픽스처(CI 그린) + RUN_AI_E2E gated 실호출. 미구현 — 계획만."
   },
   "techStack": {
     "shell": "Electron",
@@ -1087,24 +1087,24 @@
     {
       "id": "phase-7",
       "name": "AI 편집 어시스턴트",
-      "goal": "우측 채팅 패널의 AI 가 자연어 지시를 받아 실제 편집을 실행한다 — 순수 커맨드 레이어를 Claude tool-use 도구로 노출 (화면 클릭이 아닌 네이티브 실행, 모든 작업 undo 가능).",
+      "goal": "우측 채팅 패널의 AI 가 자연어 지시를 받아 실제 편집을 실행한다 — 순수 커맨드 레이어를 커스텀 도구로 노출. 백엔드는 프로바이더 추상화: v1 은 Claude Agent SDK(로컬 Claude Code 구독 인증 상속, API 키 불필요), 배포 필요 시 Anthropic API 키 프로바이더 추가.",
       "estimate": "1.5 세션",
       "status": "not_started",
       "steps": [
         {
           "id": "7.1",
-          "name": "AI 인프라 (키/프록시/채팅 패널)",
-          "description": "Anthropic API 를 메인 프로세스 프록시로 호출(키는 safeStorage, 렌더러 비노출). 우측 패널을 탭(인스펙터|AI)으로 전환하고 스트리밍 채팅 UI. 구현 착수 시 /claude-api 스킬로 최신 모델/파라미터 확인.",
+          "name": "AI 인프라 (Agent SDK 백엔드 + 채팅 패널)",
+          "description": "메인 프로세스에서 @anthropic-ai/claude-agent-sdk 실행 — 이 머신의 Claude Code 로그인(구독)을 상속하므로 API 키/과금 불필요(구독 한도 공유). 프로바이더 인터페이스로 추상화해 추후 API 키 경로 추가 가능. 직접 OAuth 토큰 재사용은 ToS 위반이라 기각. 구현 착수 시 /claude-api 스킬로 Agent SDK 최신 사용법 확인.",
           "status": "not_started",
           "checklist": [
             {
               "id": "7.1.1",
-              "task": "API 키 설정 UI + safeStorage 암호화 저장 + 키 유효성 검증(1콜)",
+              "task": "프로바이더 인터페이스 정의 + AgentSDK 프로바이더: 메인에서 query() 실행, 로그인 감지('Claude Code 로그인됨' 배지/미로그인 안내)",
               "done": false
             },
             {
               "id": "7.1.2",
-              "task": "메인 프록시 ai:complete — 스트리밍 이벤트 중계, AbortController 취소, 에러 규약",
+              "task": "IPC 브리지: 스트리밍 메시지/도구 콜백 중계, 중단(취소), 에러 규약",
               "done": false
             },
             {
@@ -1114,28 +1114,28 @@
             },
             {
               "id": "7.1.4",
-              "task": "텍스트-only 대화 동작 (모델 claude-sonnet-5 기본, 시스템 프롬프트 초안: 앱 능력/편집 규칙/한국어)",
+              "task": "텍스트-only 대화 동작(시스템 프롬프트 초안: 앱 능력/편집 규칙/한국어) + 구독 한도 공유 고지",
               "done": false
             }
           ],
           "verification": {
             "loop": [
-              "키 입력 → 검증 통과/실패 UI 확인, 재시작 후 키 유지(safeStorage) 확인",
-              "질문 전송 → 스트리밍으로 답변 표시, 중단 버튼이 즉시 끊는지 확인",
-              "키를 렌더러 devtools 에서 접근할 수 없는지 확인(프록시 경유만)"
+              "Claude Code 미로그인 상태 안내가 뜨는지(로그인 감지) 확인",
+              "질문 전송 → 스트리밍 답변, 중단 버튼 즉시 동작 확인",
+              "네트워크 계정 자격증명이 앱 코드에 저장되지 않는지 확인(SDK 위임)"
             ],
             "successCriteria": [
-              "스트리밍 대화가 동작한다",
-              "키가 안전 저장되고 렌더러에 노출되지 않는다",
+              "구독 로그인만으로(키 입력 없이) 대화가 동작한다",
+              "미로그인 시 명확한 안내가 뜬다",
               "취소가 즉시 동작한다"
             ],
-            "onFailure": "스트리밍은 IPC 이벤트(STT progress 패턴) 재사용, safeStorage 미지원 플랫폼은 평문 저장 경고 후 세션 보관"
+            "onFailure": "SDK 스폰 실패 시 PATH/설치 감지 로직 점검, 장기 세션은 스트리밍 입력 모드 검토"
           }
         },
         {
           "id": "7.2",
           "name": "도구 실행기 + 편집 도구 세트",
-          "description": "커맨드 레이어를 tool-use 도구 ~15종으로 노출: 조회(get_project_state 요약/seek/select) + 컷(split/trim/move/delete/merge/move_to_track) + 텍스트(add_text/update_text_style) + 효과(apply_filter/add_transition/set_volume_fade/set_transform). 입력 검증 실패는 모델이 읽는 한국어 에러로 반환. 에이전트 루프는 렌더러 소유, 턴당 도구 12회 캡.",
+          "description": "커맨드 레이어를 Agent SDK 인프로세스 커스텀 도구(createSdkMcpServer+tool) ~15종으로 노출: 조회(get_project_state/seek/select) + 컷(split/trim/move/delete/merge/move_to_track) + 텍스트(add_text/update_text_style) + 효과(apply_filter/add_transition/set_volume_fade/set_transform). 에이전트 루프는 SDK 가 소유(maxTurns 캡), 도구 콜백은 IPC→렌더러 executor→dispatch(1콜=1 undo). 검증 실패는 모델이 읽는 한국어 에러로 반환.",
           "status": "not_started",
           "checklist": [
             {
@@ -1150,12 +1150,12 @@
             },
             {
               "id": "7.2.3",
-              "task": "에이전트 루프(툴콜 왕복, 캡/타임아웃) + 도구 실행 칩 UI + 턴 단위 되돌리기 버튼",
+              "task": "SDK 도구 등록(maxTurns/allowedTools 캡) + 도구 실행 칩 UI + 턴 단위 되돌리기 버튼",
               "done": false
             },
             {
               "id": "7.2.4",
-              "task": "유닛: 스키마/executor 매핑 · 통합: 모의 LLM 픽스처로 루프→프로젝트 상태 단언(__test.aiRunTools)",
+              "task": "유닛: 스키마/executor 매핑 · 통합: SDK 우회 모의 툴콜 시퀀스로 executor→프로젝트 상태 단언(__test.aiRunTools)",
               "done": false
             },
             {
