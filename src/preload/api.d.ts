@@ -21,6 +21,8 @@ declare global {
       applySilenceCut(): void
       cancelSilencePreview(): void
       getSilencePreviewJson(): string
+      aiRunTools(calls: Array<{ name: string; input: Record<string, unknown> }>): Promise<Array<{ ok: boolean; message: string }>>
+      aiSendAndWait(prompt: string): Promise<void>
     }
   }
 }

@@ -13,6 +13,8 @@ asarUnpack:
   # STT(3.2): onnxruntime-node 네이티브 애드온 + Whisper WASM/토크나이저 자산
   - node_modules/onnxruntime-node/**
   - node_modules/@huggingface/**
+  # AI 어시스턴트(phase-7): Agent SDK 는 런타임에 번들 CLI 를 디스크로 추출하므로 asar 밖에 둬야 한다
+  - node_modules/@anthropic-ai/claude-agent-sdk/**
 
 mac:
   category: public.app-category.video

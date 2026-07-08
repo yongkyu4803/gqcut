@@ -3,6 +3,10 @@
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
+  AiSendOptions,
+  AiStreamEvent,
+  AiToolCallEvent,
+  AiToolReply,
   EditorApi,
   ExportStartOptions,
   ProxyProgress,
@@ -62,7 +66,23 @@ const api: EditorApi = {
     return () => ipcRenderer.off('silence:progress', listener)
   },
 
-  fileExists: (path) => ipcRenderer.invoke('media:fileExists', path)
+  fileExists: (path) => ipcRenderer.invoke('media:fileExists', path),
+
+  // ── AI 편집 어시스턴트 (phase-7) ──
+  aiCheckAuth: () => ipcRenderer.invoke('ai:checkAuth'),
+  aiSend: (opts: AiSendOptions) => ipcRenderer.invoke('ai:send', opts),
+  aiCancel: (requestId: string) => ipcRenderer.invoke('ai:cancel', requestId),
+  onAiEvent: (cb: (requestId: string, ev: AiStreamEvent) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, requestId: string, ev: AiStreamEvent): void => cb(requestId, ev)
+    ipcRenderer.on('ai:event', listener)
+    return () => ipcRenderer.off('ai:event', listener)
+  },
+  onAiToolCall: (cb: (ev: AiToolCallEvent) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, ev: AiToolCallEvent): void => cb(ev)
+    ipcRenderer.on('ai:toolCall', listener)
+    return () => ipcRenderer.off('ai:toolCall', listener)
+  },
+  aiToolReply: (callId: string, reply: AiToolReply) => ipcRenderer.invoke('ai:toolReply', callId, reply)
 }
 
 contextBridge.exposeInMainWorld('editor', api)

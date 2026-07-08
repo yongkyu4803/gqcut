@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { Preview } from './components/Preview'
-import { Inspector } from './components/Inspector'
+import { RightPanel } from './components/RightPanel'
 import { TransportBar } from './components/TransportBar'
 import { Timeline } from './components/Timeline'
 import { useEditor, serializeProject, deserializeProject } from './state/store'
@@ -115,7 +115,7 @@ export default function App(): React.JSX.Element {
       <div className="main-row">
         <MediaBin />
         <Preview />
-        <Inspector />
+        <RightPanel />
       </div>
       <TransportBar />
       <Timeline />

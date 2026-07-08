@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc'
+import { registerAiHandlers } from './ai'
 
 // ── 크래시 로깅 (6.2.3) — userData/logs/crash.log 에 기록 ──
 function crashLog(kind: string, detail: string): void {
@@ -70,6 +71,7 @@ void app.whenReady().then(() => {
   })
 
   registerIpcHandlers()
+  registerAiHandlers()
   createWindow()
 
   // 메모리 감시 (6.2.4): RSS 상한 초과 시 경고 로그 (캐시 상한은 렌더러 LRU 가 담당)

@@ -100,6 +100,47 @@ export interface ExportResult {
   stats?: { frames: number; elapsedMs: number; bytesPiped: number; mbPerSec: number }
 }
 
+// ── AI 편집 어시스턴트 (phase-7) ──
+
+export interface AiAuthStatus {
+  loggedIn: boolean
+  /** 'subscription' | 'api-key' | 'none' — UI 배지용 */
+  method: string
+  detail?: string
+}
+
+export interface AiSendOptions {
+  requestId: string
+  /** 사용자 지시문 */
+  prompt: string
+  /** summarizeProject() 결과 JSON — 모델이 참조할 현재 프로젝트 상태 */
+  contextJson: string
+  /** 최근 대화(팔로업 맥락용, 텍스트만) */
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>
+}
+
+/** main → renderer 스트리밍 이벤트 */
+export type AiStreamEvent =
+  | { type: 'assistant'; text: string }
+  | { type: 'done'; ok: boolean; error?: string; usage?: { inputTokens: number; outputTokens: number }; costUsd?: number }
+
+/** main → renderer 도구 실행 요청 (렌더러 executor 가 dispatch 후 aiToolReply 로 응답) */
+export interface AiToolCallEvent {
+  requestId: string
+  callId: string
+  name: string
+  input: Record<string, unknown>
+}
+
+/** renderer → main 도구 실행 결과 */
+export interface AiToolReply {
+  ok: boolean
+  /** 모델이 읽는 결과/에러 메시지 (한국어) */
+  message: string
+  /** 비전 도구: 프리뷰 PNG dataURL — 있으면 모델에 이미지 블록으로 전달 */
+  imageDataUrl?: string
+}
+
 export interface EditorApi {
   ping(): Promise<string>
   platform: string
@@ -149,4 +190,18 @@ export interface EditorApi {
 
   /** e2e 전용: 파일 경로 직접 임포트 (다이얼로그 우회) */
   fileExists(path: string): Promise<boolean>
+
+  // ── AI 편집 어시스턴트 (phase-7) ──
+  /** Claude Code 구독/API 키 로그인 상태 (배지·안내용) */
+  aiCheckAuth(): Promise<AiAuthStatus>
+  /** 지시문 전송 → Agent SDK 실행 시작. 결과/스트림은 onAiEvent, 도구 실행은 onAiToolCall. Promise 는 완료(done) 시 resolve. */
+  aiSend(opts: AiSendOptions): Promise<void>
+  /** 진행 중인 실행 중단 */
+  aiCancel(requestId: string): Promise<void>
+  /** 스트리밍 답변/완료 이벤트 구독 */
+  onAiEvent(cb: (requestId: string, ev: AiStreamEvent) => void): () => void
+  /** 도구 실행 요청 구독 (렌더러가 executor 로 실행 후 aiToolReply) */
+  onAiToolCall(cb: (ev: AiToolCallEvent) => void): () => void
+  /** 도구 실행 결과를 main 으로 반환 (모델로 중계됨) */
+  aiToolReply(callId: string, reply: AiToolReply): Promise<void>
 }

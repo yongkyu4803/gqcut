@@ -12,6 +12,9 @@ import { captureReferenceFrame, exportTimeline, DEFAULT_EXPORT_SETTINGS } from '
 import { generateCaptions } from './stt/autoCaption'
 import type { SttModel } from '@shared/subtitles'
 import { applySilenceCut, cancelSilencePreview, detectSilence } from './silence/autoCut'
+import { executeTool } from './ai/executor'
+import { useAi } from './ai/aiStore'
+import { summarizeProject } from '@shared/aiSummary'
 
 export function installTestHooks(): void {
   window.__test = {
@@ -121,6 +124,46 @@ export function installTestHooks(): void {
     /** 현재 무음 감지 미리보기 상태(JSON) — e2e 검증용 */
     getSilencePreviewJson(): string {
       return JSON.stringify(useEditor.getState().silencePreview)
+    },
+
+    /**
+     * AI 도구 시퀀스를 SDK/네트워크 없이 executor 로 직접 실행 (7.2.4 통합 테스트).
+     * 확인 게이트는 자동 승인해 파괴적 도구도 진행된다(게이트 UI 는 별도 검증).
+     */
+    async aiRunTools(calls: Array<{ name: string; input: Record<string, unknown> }>): Promise<Array<{ ok: boolean; message: string }>> {
+      const unsub = useAi.subscribe((s) => {
+        if (s.pendingConfirm) useAi.getState().resolveConfirm(true)
+      })
+      try {
+        const out: Array<{ ok: boolean; message: string }> = []
+        for (const c of calls) {
+          const r = await executeTool(c)
+          out.push({ ok: r.ok, message: r.message })
+        }
+        return out
+      } finally {
+        unsub()
+      }
+    },
+
+    /**
+     * 실제 Agent SDK 로 1턴 실행하고 완료까지 대기 (RUN_AI_E2E gated e2e 7.3.4).
+     * 도구 콜백은 마운트된 AiPanel 이 executor 로 처리한다. 확인 게이트는 자동 승인.
+     */
+    async aiSendAndWait(prompt: string): Promise<void> {
+      const unsub = useAi.subscribe((s) => {
+        if (s.pendingConfirm) useAi.getState().resolveConfirm(true)
+      })
+      try {
+        const s = useEditor.getState()
+        const contextJson = JSON.stringify(summarizeProject(s.project, { selectedClipId: s.selectedClipId, playhead: s.playhead }))
+        const requestId = genId('req')
+        useAi.getState().pushUser(prompt)
+        useAi.getState().beginAssistant(requestId)
+        await window.editor.aiSend({ requestId, prompt, contextJson })
+      } finally {
+        unsub()
+      }
     }
   }
 }
