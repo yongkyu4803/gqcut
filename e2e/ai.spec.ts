@@ -68,6 +68,47 @@ test.describe('AI 패널 — 모의 경로 (네트워크 없이 CI 그린)', () 
 
     await app.close()
   })
+
+  test('add_text 자막이 실제 렌더링에서 하단 가이드선(0.95H)에 놓인다 (픽셀 검증)', async () => {
+    const { app, win } = await launch()
+    // 검정 배경 + 흰 자막을 t=0 에 추가하고 실제 합성 프레임을 캡처해 흰 글자 픽셀 세로 범위를 분석
+    const info = await win.evaluate(async () => {
+      await window.__test!.aiRunTools([{ name: 'add_text', input: { value: '자막 위치 테스트', atSec: 0, durationSec: 2 } }])
+      const dataUrl = await window.__test!.captureFrame(0)
+      const img = new Image()
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res()
+        img.onerror = () => rej(new Error('img load fail'))
+        img.src = dataUrl
+      })
+      const cv = document.createElement('canvas')
+      cv.width = img.width
+      cv.height = img.height
+      const ctx = cv.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data
+      let minY = cv.height
+      let maxY = -1
+      for (let y = 0; y < cv.height; y++) {
+        for (let x = 0; x < cv.width; x++) {
+          const i = (y * cv.width + x) * 4
+          if (data[i] + data[i + 1] + data[i + 2] > 200) {
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
+            break
+          }
+        }
+      }
+      return { w: img.width, h: img.height, minY, maxY }
+    })
+
+    expect(info.maxY, '자막 픽셀이 렌더링되어야 한다').toBeGreaterThan(0)
+    // 텍스트 하단이 화면 중앙(0.5H) 훨씬 아래 = 하단 배치
+    expect(info.maxY / info.h).toBeGreaterThan(0.85)
+    // 텍스트 하단이 하단 가이드선(0.95H) 근처 (안전영역 밖으로 벗어나지 않고 ±6% 이내)
+    expect(Math.abs(info.maxY - info.h * 0.95)).toBeLessThan(info.h * 0.06)
+    await app.close()
+  })
 })
 
 test.describe('AI 실제 1턴 (RUN_AI_E2E)', () => {

@@ -13,6 +13,7 @@ import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
 import { applySilenceCut, cancelSilencePreview, detectSilence } from '@renderer/silence/autoCut'
+import { rangesCoverage } from '@shared/silence'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -191,6 +192,12 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
   const candidates = showPreview ? preview.candidates : []
   const selectedCount = candidates.filter((c) => c.selected).length
   const totalSaved = candidates.filter((c) => c.selected).reduce((sum, c) => sum + (c.end - c.start), 0)
+  // 클립 전체가 무음으로 잡히면 감지 오류일 가능성 — 수동 UI 는 차단하지 않고 경고만(사용자가 직접 판단)
+  const coverage = rangesCoverage(
+    candidates.filter((c) => c.selected).map((c) => [c.start, c.end]),
+    clip.timelineStart,
+    clip.timelineEnd
+  )
 
   return (
     <>
@@ -233,6 +240,11 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
             <br />
             적용 범위: {preview.scope === 'all-tracks' ? '전체 트랙' : '이 트랙만'}
           </p>
+          {coverage >= 0.95 && (
+            <p className="hint" data-testid="silence-coverage-warn" style={{ fontSize: 11, textAlign: 'left', color: '#ffb4b4' }}>
+              ⚠️ 선택 구간이 클립의 {Math.round(coverage * 100)}%입니다 — 적용하면 클립이 거의 사라집니다. 감지 오류라면 임계값을 -45dB 등으로 낮춰 다시 감지하세요.
+            </p>
+          )}
           <div data-testid="silence-candidate-list" style={{ maxHeight: 140, overflowY: 'auto' }}>
             {candidates.map((c) => (
               <label key={c.id} className="insp-row" style={{ fontSize: 11 }}>

@@ -30,6 +30,20 @@ export function mapSilenceToTimeline(intervals: SilenceInterval[], clip: ClipTim
   return out
 }
 
+/**
+ * 선택 구간이 클립 구간의 몇 비율을 덮는지 (0~1). 겹침은 병합 후 계산해 이중 카운트 방지.
+ * AI 무음 컷의 "클립 전체 삭제" 가드에 사용 — 커버리지가 임계(≥0.95)면 감지 오류로 보고 자동 적용을 막는다.
+ */
+export function rangesCoverage(ranges: Array<[number, number]>, clipStart: number, clipEnd: number): number {
+  const dur = clipEnd - clipStart
+  if (dur <= 0) return 0
+  const clamped = ranges
+    .map(([s, e]): [number, number] => [Math.max(s, clipStart), Math.min(e, clipEnd)])
+    .filter(([s, e]) => e - s > 0)
+  const covered = mergeRanges(clamped).reduce((sum, [s, e]) => sum + (e - s), 0)
+  return covered / dur
+}
+
 /** 구간들을 시작 시간 순 정렬 후 겹치거나 인접(gap<=epsilon)한 것을 병합 */
 export function mergeRanges(ranges: Array<[number, number]>, epsilonSec = EPS): Array<[number, number]> {
   if (ranges.length === 0) return []

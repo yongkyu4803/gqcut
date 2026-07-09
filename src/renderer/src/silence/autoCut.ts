@@ -27,7 +27,8 @@ export async function detectSilence(clipId: string, opts: DetectSilenceOptions):
   const asset = state.project.assets.find((a) => a.id === clip.assetId)
   if (!asset?.hasAudio) throw new Error('이 클립에는 오디오가 없습니다')
 
-  // 무음 감지는 원본 오디오 기준 — STT 와 동일 원칙(압축 프록시로 인한 오탐 방지)
+  // 무음 감지 소스: 호환 프록시(원본 오디오를 AAC 로 재인코딩·보존) 우선, 없으면 원본.
+  // 저화질 성능 프록시(perfProxyPath)는 오디오가 없거나 저품질이라 쓰지 않는다(오탐 방지).
   const sourcePath = asset.proxyPath ?? asset.path
 
   const jobId = genId('silence')

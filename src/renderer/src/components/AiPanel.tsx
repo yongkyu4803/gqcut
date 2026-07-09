@@ -25,7 +25,9 @@ const TOOL_LABELS: Record<string, string> = {
   set_volume_fade: '볼륨/페이드',
   set_transform: '위치/크기',
   auto_captions: '자동 자막',
-  remove_silence: '무음 컷',
+  remove_silence: '무음 감지',
+  apply_silence_cut: '무음 컷 적용',
+  add_overlay: '오버레이 추가',
   export_video: '내보내기',
   capture_preview: '화면 캡처'
 }

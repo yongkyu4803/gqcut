@@ -107,11 +107,13 @@ export const AI_TOOLS: AiToolSpec[] = [
   // ── 텍스트/자막 ──
   {
     name: 'add_text',
-    description: '텍스트(자막) 클립을 추가한다. "N초에 ~라는 자막 넣어줘". 최상단 텍스트 트랙에 배치된다.',
+    description:
+      '텍스트(자막) 클립을 추가한다. "N초에 ~라는 자막 넣어줘". 최상단 텍스트 트랙에 배치되며, 기본 위치는 화면 하단 자막 기준선이다. 제목처럼 다른 위치가 필요하면 position 을 지정한다.',
     shape: {
       value: z.string().min(1).describe('표시할 문구'),
       atSec: z.number().min(0).describe('나타날 시각(초)'),
-      durationSec: z.number().min(0.1).optional().describe('표시 길이(초, 기본 3)')
+      durationSec: z.number().min(0.1).optional().describe('표시 길이(초, 기본 3)'),
+      position: z.enum(['bottom', 'center', 'top']).optional().describe('세로 위치(기본 bottom=화면 하단 자막선)')
     },
     category: 'text'
   },
@@ -194,13 +196,20 @@ export const AI_TOOLS: AiToolSpec[] = [
   {
     name: 'remove_silence',
     description:
-      '클립의 무음 구간을 감지해 컷 후보를 만든다(미리보기). 실제 삭제는 사용자 확인 후 적용된다. "무음 잘라줘".',
+      '무음 구간을 감지해 타임라인에 컷 후보를 표시한다(미리보기 전용 — 이 도구는 아무것도 삭제하지 않는다). "무음 잘라줘". 감지 결과(구간 수·총 초·클립 대비 커버리지)를 사용자에게 보고하고 이번 응답을 마친 뒤, 사용자가 타임라인에서 확인하고 적용을 지시하면 그때 apply_silence_cut 을 호출한다. 감지와 적용을 같은 응답에서 연달아 하지 말 것.',
     shape: {
       clipId: z.string().describe('분석할 비디오/오디오 클립 id'),
-      noiseDb: z.number().max(0).optional().describe('무음 임계(dBFS, 기본 -35)'),
+      noiseDb: z.number().max(0).optional().describe('무음 임계(dBFS, 기본 -35). 전체가 무음으로 잡히면 -45 등으로 낮춰 재시도'),
       minDurationSec: z.number().min(0.05).optional().describe('무음 최소 길이(초, 기본 0.5)'),
-      scope: z.enum(['this-track', 'all-tracks']).optional().describe('적용 범위(기본 this-track)')
+      scope: z.enum(['this-track', 'all-tracks']).optional().describe('적용 범위(기본 this-track). all-tracks 는 사용자가 명시 요청할 때만')
     },
+    category: 'highlevel'
+  },
+  {
+    name: 'apply_silence_cut',
+    description:
+      'remove_silence 로 만든 현재 미리보기의 무음 구간을 실제로 잘라낸다(되돌리기 어려운 파괴적 작업, 확인 게이트). 반드시 remove_silence 로 감지해 사용자가 확인한 다음 응답에서만 호출한다. 미리보기가 없거나 편집으로 무효화됐으면 다시 감지해야 한다.',
+    shape: {},
     category: 'highlevel',
     destructive: true
   },

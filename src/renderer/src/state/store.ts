@@ -30,6 +30,8 @@ export interface SilencePreview {
   clipId: string
   scope: SilenceScope
   candidates: SilenceCandidate[]
+  /** AI 가 감지한 경우 그 실행(run)의 requestId — 같은 응답 안에서 감지·적용 연쇄를 막는 데 쓴다(7.4). 수동 감지는 undefined. */
+  detectedByAiRequest?: string
 }
 
 export interface EditorState {

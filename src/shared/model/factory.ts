@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset, Project, TextContent, Track, Transform } from './types'
 import { SCHEMA_VERSION } from './types'
+import { bottomSafeLineFromCenter } from '../safeArea'
 
 let counter = 0
 /** 충돌 없는 짧은 id (프로세스 로컬 카운터 + 시각) */
@@ -90,7 +91,18 @@ export const SUBTITLE_TEXT: TextContent = {
 }
 
 /**
- * 자막 클립 (3.2.3) — STT 결과 배치용. 하단 중앙 기본 위치(캔버스 높이의 ~76% 지점).
+ * 자막 하단 기준선 y 오프셋 (캔버스 중앙 기준, +아래, 프로젝트 px).
+ * 텍스트 블록의 "하단"을 프리뷰 하단 세이프 가이드선(safeArea.bottomSafeLineFromCenter)에 맞춘다
+ * — 생성된 자막이 화면의 자막 가이드선과 정확히 정렬된다. fontSize 로 라스터 반높이를 근사 보정해
+ * 글자 크기가 달라도 하단선이 일정하다. (transform.y 는 생성 시 고정 — 이후 set_transform 으로 조정 가능)
+ */
+export function subtitleBottomY(canvasHeight: number, fontSize: number): number {
+  const approxHalfHeight = fontSize * 0.9 // 라스터 반높이 근사(줄높이+외곽선/배경 패딩 여유)
+  return Math.round(bottomSafeLineFromCenter(canvasHeight) - approxHalfHeight)
+}
+
+/**
+ * 자막 클립 (3.2.3) — STT 결과 배치용. 화면 하단 기준선에 정렬(자막 안전 영역).
  */
 export function createSubtitleClip(timelineStart: number, timelineEnd: number, text: string, canvasHeight: number): Clip {
   return {
@@ -99,8 +111,7 @@ export function createSubtitleClip(timelineStart: number, timelineEnd: number, t
     timelineStart,
     timelineEnd,
     opacity: 1,
-    // 화면 중앙 기준 오프셋 — 하단쪽으로 (높이의 26% 아래)
-    transform: { x: 0, y: Math.round(canvasHeight * 0.26), scale: 1, rotation: 0 },
+    transform: { x: 0, y: subtitleBottomY(canvasHeight, SUBTITLE_TEXT.fontSize), scale: 1, rotation: 0 },
     text: { ...SUBTITLE_TEXT, value: text }
   }
 }

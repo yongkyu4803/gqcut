@@ -12,8 +12,9 @@ import type { Clip, Project } from '@shared/model/types'
 import type { AiToolReply } from '@shared/ipc-types'
 import { AI_TOOL_BY_NAME } from '@shared/aiTools'
 import { summarizeProject } from '@shared/aiSummary'
+import { rangesCoverage } from '@shared/silence'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
-import { createMediaClip, createTextClip, createTrack, genId } from '@shared/model/factory'
+import { createMediaClip, createTextClip, createTrack, genId, subtitleBottomY } from '@shared/model/factory'
 import { useEditor } from '../state/store'
 import {
   addClipOverlay,
@@ -138,7 +139,10 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
       const r = requireClip(clipId)
       if ('error' in r) return err(r.error)
       const label = r.clip.kind === 'text' ? `자막 "${r.clip.text?.value ?? ''}"` : `${r.clip.kind} 클립`
-      const confirmed = await ai.requestConfirm('클립 삭제', `${label} (${r.clip.timelineStart}~${r.clip.timelineEnd}s) 를 삭제합니다.`)
+      const confirmed = await ai.requestConfirm(
+        '클립 삭제',
+        `${label} (${r.clip.timelineStart.toFixed(2)}~${r.clip.timelineEnd.toFixed(2)}s) 를 삭제합니다.\n⌘Z 로 복구할 수 있습니다.`
+      )
       if (!confirmed) return err('사용자가 삭제를 취소했습니다.')
       if (ed().selectedClipId === clipId) ed().select(null)
       const changed = dispatchChange('AI: 클립 삭제', (p) => removeClip(p, clipId))
@@ -152,9 +156,15 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
       const dur = (input.durationSec as number | undefined) ?? 3
       const clip = createTextClip(atSec, dur)
       clip.text = { ...clip.text!, value }
+      // 자막 세로 위치 — 기본은 화면 하단 자막 기준선(요청: 최초 생성 위치를 하단에)
+      const position = (input.position as 'bottom' | 'center' | 'top' | undefined) ?? 'bottom'
+      const bottomY = subtitleBottomY(ed().project.settings.height, clip.text.fontSize)
+      const y = position === 'center' ? 0 : position === 'top' ? -bottomY : bottomY
+      clip.transform = { ...clip.transform!, y }
       dispatchChange('AI: 자막 추가', (p) => addSubtitleClips(p, [clip], createTrack('text')))
       ed().select(clip.id)
-      return ok(`"${value}" 자막을 ${atSec}s 에 추가했습니다. (id: ${clip.id})`)
+      const posLabel = position === 'center' ? '중앙' : position === 'top' ? '상단' : '하단'
+      return ok(`"${value}" 자막을 ${atSec}s 에 ${posLabel}에 추가했습니다. (id: ${clip.id})`)
     }
     case 'update_text_style': {
       const clipId = input.clipId as string
@@ -256,18 +266,58 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
       const r = requireClip(clipId)
       if ('error' in r) return err(r.error)
       if (r.clip.kind === 'text' || r.clip.kind === 'image') return err('비디오/오디오 클립에만 무음 컷을 적용할 수 있습니다.')
-      const { detectSilence, applySilenceCut } = await import('../silence/autoCut')
+      const { detectSilence } = await import('../silence/autoCut')
       const count = await detectSilence(clipId, {
         noiseDb: (input.noiseDb as number | undefined) ?? -35,
         minDurationSec: (input.minDurationSec as number | undefined) ?? 0.5,
         scope: (input.scope as 'this-track' | 'all-tracks' | undefined) ?? 'this-track'
       })
-      if (count === 0) return err('무음 구간을 찾지 못했습니다(임계치/최소 길이를 조정해 보세요).')
-      const confirmed = await ai.requestConfirm('무음 컷 적용', `${count}개의 무음 구간을 잘라내고 뒤를 당깁니다.`)
-      if (!confirmed) return err(`무음 구간 ${count}개를 찾았지만 사용자가 적용을 취소했습니다(미리보기는 유지).`)
+      if (count === 0) return err('무음 구간을 찾지 못했습니다(임계치를 낮추거나 최소 길이를 줄여 보세요).')
+      // 같은 응답 안에서 감지→적용 연쇄를 막기 위해 이번 run 의 requestId 를 미리보기에 각인 (7.4)
+      const reqId = useAi.getState().currentRequestId
+      const pv = ed().silencePreview
+      if (reqId && pv) ed().setSilencePreview({ ...pv, detectedByAiRequest: reqId })
+      const found = findClip(ed().project, clipId)!
+      const ranges = (ed().silencePreview?.candidates ?? []).map((c) => [c.start, c.end] as [number, number])
+      const cov = rangesCoverage(ranges, found.clip.timelineStart, found.clip.timelineEnd)
+      const totalSec = ranges.reduce((s, [a, b]) => s + (b - a), 0)
+      const warn =
+        cov >= 0.95
+          ? ` ⚠️ 클립의 ${Math.round(cov * 100)}%가 무음으로 잡혔습니다 — 임계값이 너무 높을 수 있으니 -45dB 등으로 낮춰 다시 감지하는 것을 권합니다.`
+          : ''
+      return ok(
+        `무음 ${count}개 구간(총 ${totalSec.toFixed(1)}초, 클립의 약 ${Math.round(cov * 100)}%)을 감지해 타임라인에 표시했습니다. 이 도구는 아직 아무것도 삭제하지 않았습니다.${warn} 사용자가 확인하고 적용을 지시하면 apply_silence_cut 을 호출하세요.`
+      )
+    }
+    case 'apply_silence_cut': {
+      const preview = ed().silencePreview
+      if (!preview) return err('적용할 무음 미리보기가 없습니다. 먼저 remove_silence 로 감지하세요.')
+      const cur = useAi.getState().currentRequestId
+      if (preview.detectedByAiRequest && cur && preview.detectedByAiRequest === cur)
+        return err(
+          '방금 감지한 결과라 이번 응답에서는 적용하지 않습니다. 감지 결과를 사용자에게 보고하고 응답을 마치세요 — 사용자가 타임라인에서 확인한 뒤 "적용해"라고 지시하면 그때 적용됩니다.'
+        )
+      const selected = preview.candidates.filter((c) => c.selected)
+      if (selected.length === 0) return err('선택된 무음 구간이 없습니다.')
+      const ranges = selected.map((c) => [c.start, c.end] as [number, number])
+      const totalSec = ranges.reduce((s, [a, b]) => s + (b - a), 0)
+      const found = findClip(ed().project, preview.clipId)
+      if (found) {
+        const cov = rangesCoverage(ranges, found.clip.timelineStart, found.clip.timelineEnd)
+        if (cov >= 0.95)
+          return err(
+            `선택 구간이 클립의 ${Math.round(cov * 100)}%를 덮어 클립이 통째로 사라집니다. 감지 오류일 가능성이 높으니, 임계값을 낮춰(예: -45dB) 다시 감지하거나 정말 삭제할 의도라면 인스펙터의 "무음 자동 컷"에서 직접 적용하세요. (안전을 위해 AI 는 클립 전체 삭제를 자동 적용하지 않습니다.)`
+          )
+      }
+      const { applySilenceCut } = await import('../silence/autoCut')
+      const confirmed = await ai.requestConfirm(
+        '무음 컷 적용',
+        `${selected.length}개 구간 · 총 ${totalSec.toFixed(1)}초 삭제 · 범위: ${preview.scope === 'all-tracks' ? '전체 트랙' : '이 트랙만'}\n⌘Z 로 되돌릴 수 있습니다.`
+      )
+      if (!confirmed) return err('사용자가 적용을 취소했습니다(미리보기는 유지).')
       applySilenceCut()
       playback.refresh()
-      return ok(`무음 구간 ${count}개를 잘라냈습니다.`)
+      return ok(`무음 ${selected.length}개 구간(총 ${totalSec.toFixed(1)}초)을 잘라냈습니다. 되돌리려면 ⌘Z.`)
     }
     case 'add_overlay': {
       const assetId = input.assetId as string

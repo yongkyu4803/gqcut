@@ -34,7 +34,8 @@ export async function generateCaptions(clipId: string, opts: AutoCaptionOptions)
   const asset = state.project.assets.find((a) => a.id === found.clip.assetId)
   if (!asset?.hasAudio) throw new Error('이 클립에는 오디오가 없습니다')
 
-  // STT 는 원본 오디오 기준 — 성능 프록시(무음/저화질)가 아닌 원본 경로 사용
+  // STT 소스: 호환 프록시(원본 오디오를 AAC 로 재인코딩·보존) 우선, 없으면 원본.
+  // 저화질 성능 프록시(perfProxyPath)는 오디오 품질이 낮아 쓰지 않는다.
   const sourcePath = asset.proxyPath ?? asset.path
   void decodePath // (프리뷰 경로 로직과 구분: STT 는 원본 오디오)
 

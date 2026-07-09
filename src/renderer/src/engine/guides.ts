@@ -8,8 +8,7 @@
  * 텍스트 블록 높이의 절반(edgeOffset)만큼 target 을 이동해 넘기고, display 는 항상 실제 안전선 위치.
  */
 import type { Project } from '@shared/model/types'
-
-const SAFE_MARGIN_RATIO = 0.1 // 상하 10% 세이프 마진(널리 쓰이는 title-safe 근사치)
+import { bottomSafeLineFromCenter } from '@shared/safeArea'
 
 export interface SnapCandidate {
   target: number // 드래그 좌표와 비교할 값
@@ -34,7 +33,8 @@ export function computeGuideCandidates(
 ): { x: number[]; y: number[]; edgeY: number[] } {
   const x = [0]
   const y = [0]
-  const edgeY = [-(canvasH / 2) * (1 - SAFE_MARGIN_RATIO), (canvasH / 2) * (1 - SAFE_MARGIN_RATIO)]
+  const bottom = bottomSafeLineFromCenter(canvasH)
+  const edgeY = [-bottom, bottom]
   for (const track of project.tracks) {
     for (const c of track.clips) {
       if (c.id === excludeClipId) continue

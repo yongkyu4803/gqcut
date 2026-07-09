@@ -53,6 +53,8 @@ interface AiState {
   currentRequestId: string | null
   activeAssistantId: string | null
   pendingConfirm: PendingConfirm | null
+  /** 대기 중인 확인 요청 큐 (pendingConfirm 이 활성일 때 추가 요청이 여기 쌓임) — 병렬 파괴적 호출의 덮어쓰기(행) 방지 */
+  confirmQueue: PendingConfirm[]
   usage: AiUsage
   visionOptIn: boolean
 
@@ -77,6 +79,7 @@ export const useAi = create<AiState>((set, get) => ({
   currentRequestId: null,
   activeAssistantId: null,
   pendingConfirm: null,
+  confirmQueue: [],
   usage: { costUsd: 0, inputTokens: 0, outputTokens: 0 },
   visionOptIn: false,
 
@@ -148,13 +151,19 @@ export const useAi = create<AiState>((set, get) => ({
 
   requestConfirm: (title, detail, privacy) =>
     new Promise<boolean>((resolve) => {
-      set({ pendingConfirm: { id: genId('cf'), title, detail, privacy, resolve } })
+      const item: PendingConfirm = { id: genId('cf'), title, detail, privacy, resolve }
+      // 이미 확인창이 떠 있으면 큐에 넣는다(덮어쓰지 않음) — 앞 요청의 resolve 유실/행 방지
+      set((s) => (s.pendingConfirm ? { confirmQueue: [...s.confirmQueue, item] } : { pendingConfirm: item }))
     }),
 
   resolveConfirm: (ok) => {
     const pc = get().pendingConfirm
     if (pc) pc.resolve(ok)
-    set({ pendingConfirm: null })
+    // 큐의 다음 확인창을 활성화
+    set((s) => {
+      const [next, ...rest] = s.confirmQueue
+      return { pendingConfirm: next ?? null, confirmQueue: rest }
+    })
   },
 
   rollbackTurn: (messageId) => {
