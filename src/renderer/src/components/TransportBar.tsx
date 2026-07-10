@@ -9,6 +9,7 @@ import { addClip, canMergeClip, projectDuration, splitClip, mergeClip } from '@r
 import { importSubtitlesFromSrt } from '@renderer/subtitles/importSrt'
 import { playback } from '@renderer/engine/playback'
 import { exportTimeline, type ExportSettings } from '@renderer/engine/exporter'
+import { applyTheme, getStoredTheme, type Theme } from '@renderer/theme'
 import { ExportDialog } from './ExportDialog'
 
 export function TransportBar(): React.JSX.Element {
@@ -56,6 +57,13 @@ export function TransportBar(): React.JSX.Element {
 
   const [showExportDialog, setShowExportDialog] = useState(false)
   const projectPath = useEditor((s) => s.projectPath)
+
+  const [theme, setTheme] = useState<Theme>(getStoredTheme)
+  const toggleTheme = (): void => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    applyTheme(next)
+    setTheme(next)
+  }
 
   const save = async (): Promise<void> => {
     const json = serializeProject(project)
@@ -147,6 +155,14 @@ export function TransportBar(): React.JSX.Element {
         ⬇ 자막
       </button>
       <span className="flex-spacer" />
+      <button
+        className="btn"
+        data-testid="theme-toggle"
+        onClick={toggleTheme}
+        title={theme === 'dark' ? '라이트(베이지) 모드로 전환' : '다크 모드로 전환'}
+      >
+        {theme === 'dark' ? '☀️ 라이트' : '🌙 다크'}
+      </button>
       <button className="btn export" data-testid="export-btn" onClick={() => setShowExportDialog(true)}>
         ⬆ 내보내기 (H.264)
       </button>

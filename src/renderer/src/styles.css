@@ -7,6 +7,27 @@
   --text-dim: #9a9aa4;
   --accent: #4f7cff;
   --accent-2: #7ae2b4;
+  /* 구조 표면 (테마별로 달라지는 하드코딩 색을 변수화) */
+  --stage: #0b0b0d; /* 프리뷰 스테이지(캔버스 주변) */
+  --inset: #101014; /* 진행바 등 파인 홈 */
+  --clip-outline: #ffffff; /* 선택 클립 외곽선 */
+  --warn: #ffb08a; /* 경고(누락 미디어 등) 텍스트 */
+}
+
+/* 라이트(베이지) 테마 — 순백보다 약간 따뜻한 오프화이트 */
+:root[data-theme='light'] {
+  --bg: #ece6da;
+  --panel: #f4efe4;
+  --panel-2: #e6dfce;
+  --border: #d5ccb8;
+  --text: #2c2a24;
+  --text-dim: #7d7666;
+  --accent: #3f63d6;
+  --accent-2: #1f9e6b;
+  --stage: #cfc7b6;
+  --inset: #ded6c5;
+  --clip-outline: #2c2a24;
+  --warn: #a8430f;
 }
 
 * {
@@ -85,7 +106,7 @@ body {
 .proxy-progress {
   position: relative;
   height: 18px;
-  background: #101014;
+  background: var(--inset);
   border-radius: 4px;
   overflow: hidden;
   font-size: 10px;
@@ -108,7 +129,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0b0b0d;
+  background: var(--stage);
   min-width: 0;
   min-height: 0;
   padding: 12px;
@@ -216,10 +237,12 @@ select {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
+  color: #fff;
 }
 .btn.export {
   background: #2b5c43;
   border-color: var(--accent-2);
+  color: #fff;
 }
 .btn.small {
   padding: 3px 8px;
@@ -227,7 +250,7 @@ select {
 }
 .btn.missing {
   border-color: #b3552e;
-  color: #ffb08a;
+  color: var(--warn);
 }
 .mini-btn {
   background: var(--panel-2);
@@ -363,8 +386,8 @@ select {
   background: #7a5c2b;
 }
 .clip.selected {
-  border-color: #fff;
-  box-shadow: 0 0 0 1px #fff;
+  border-color: var(--clip-outline);
+  box-shadow: 0 0 0 1px var(--clip-outline);
 }
 .clip-label {
   font-size: 11px;
@@ -479,7 +502,7 @@ select {
 .progress-track {
   width: 100%;
   height: 8px;
-  background: #101014;
+  background: var(--inset);
   border-radius: 4px;
   overflow: hidden;
 }
