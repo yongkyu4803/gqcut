@@ -13,6 +13,7 @@ import { buildSceneAccurate } from './scene'
 import { interleaveStereo, renderMixdown } from './audioEngine'
 import { playback } from './playback'
 import { projectDuration } from '@renderer/state/commands'
+import { collectSfxTriggers } from '@shared/sfx'
 
 export interface ExportSettings {
   /** 출력 해상도: 프로젝트 그대로 or 프리셋 */
@@ -67,7 +68,9 @@ export function exportTimeline(
     if (totalFrames === 0) return { ok: false, error: '타임라인이 비어 있습니다' }
 
     const scale = presetScale(project, settings.resolution)
-    const withAudio = hasAnyAudio(project)
+    // 전환 효과음(phase-9)도 오디오로 간주 — 원본 오디오가 없어도 SFX 만으로 오디오 스트림 생성
+    const sfxTriggers = collectSfxTriggers(project)
+    const withAudio = hasAnyAudio(project) || sfxTriggers.length > 0
 
     const { jobId } = await window.editor.exportStart({
       outputPath,
@@ -88,7 +91,12 @@ export function exportTimeline(
       if (withAudio) {
         const engine = playback.ensureAudioEngine(project)
         await engine.ensureAllLoaded(project)
-        const mixdown = await renderMixdown(project, durationSec, (id) => engine.getBuffer(id))
+        await engine.ensureSfxLoaded()
+        // 믹스다운 길이는 durationSec 유지 — ffmpeg -shortest 가 영상 길이에 맞추므로 영상 뒤로 넘어가는 SFX 꼬리는 어차피 잘린다
+        const mixdown = await renderMixdown(project, durationSec, (id) => engine.getBuffer(id), {
+          triggers: sfxTriggers,
+          getBuffer: (id) => engine.getSfxBuffer(id)
+        })
         const pcm = interleaveStereo(mixdown)
         const bytes = new Uint8Array(pcm.buffer)
         for (let off = 0; off < bytes.byteLength; off += AUDIO_CHUNK_BYTES) {

@@ -100,6 +100,8 @@ export interface Transition {
   type: 'dissolve' | 'wipe' | 'slide' | 'fade' | (string & {})
   duration: number // 초 — 시간 의미론은 DATA-MODEL.md §1.1 (소스 핸들 규칙)
   params?: Record<string, number>
+  /** 전환 효과음 (phase-9) — id 는 shared/sfx.ts SFX_LIBRARY 참조. params 가 number-only 라 별도 필드. 옵셔널이라 구버전 하위호환. */
+  sound?: { id: string; volume?: number }
 }
 
 export interface TextContent {

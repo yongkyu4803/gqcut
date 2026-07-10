@@ -34,15 +34,20 @@ export function Timeline(): React.JSX.Element {
   const project = useEditor((s) => s.project)
   const pxPerSec = useEditor((s) => s.pxPerSec)
   const playhead = useEditor((s) => s.playhead)
-  const selectedClipId = useEditor((s) => s.selectedClipId)
+  const selectedClipIds = useEditor((s) => s.selectedClipIds)
   const dispatch = useEditor((s) => s.dispatch)
   const select = useEditor((s) => s.select)
+  const toggleSelect = useEditor((s) => s.toggleSelect)
+  const selectRangeTo = useEditor((s) => s.selectRangeTo)
+  const clearSelection = useEditor((s) => s.clearSelection)
   const setZoom = useEditor((s) => s.setZoom)
   const silencePreview = useEditor((s) => s.silencePreview)
   const toggleSilenceCandidate = useEditor((s) => s.toggleSilenceCandidate)
 
   const [drag, setDrag] = useState<DragState | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 무수식 클릭으로 이미 다중선택된 클립을 눌렀을 때: 드래그 없이 pointerup 되면 단일 선택으로 축소
+  const pendingCollapse = useRef<string | null>(null)
 
   const duration = Math.max(projectDuration(project), 10)
   const contentW = duration * pxPerSec + 400
@@ -92,7 +97,20 @@ export function Timeline(): React.JSX.Element {
   // ── 클립 드래그/트림 ────────────────────────────────────
   const beginDrag = (e: React.PointerEvent, mode: DragMode, track: Track, clip: Clip): void => {
     e.stopPropagation()
-    select(clip.id)
+    pendingCollapse.current = null
+    // 이동 클릭에 수식키가 있으면 선택 제스처로만 처리하고 드래그는 시작하지 않는다
+    if (mode === 'move' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+      if (e.shiftKey) selectRangeTo(clip.id)
+      else toggleSelect(clip.id)
+      return
+    }
+    const sel = useEditor.getState().selectedClipIds
+    if (sel.length > 1 && sel.includes(clip.id)) {
+      // 다중 선택 유지 — 실제 드래그가 없으면 pointerup 에서 단일로 축소
+      pendingCollapse.current = clip.id
+    } else {
+      select(clip.id)
+    }
     setDrag({
       mode,
       clipId: clip.id,
@@ -132,6 +150,13 @@ export function Timeline(): React.JSX.Element {
     if (!drag) return
     const d = drag
     setDrag(null)
+    // 무수식 클릭(드래그 없음)으로 다중 선택 클립을 눌렀던 경우 → 단일 선택으로 축소
+    const collapseId = pendingCollapse.current
+    pendingCollapse.current = null
+    if (collapseId && d.mode === 'move' && !d.hoverTrackId && Math.abs(d.preview.start - d.origStart) <= 1e-6) {
+      select(collapseId)
+      return
+    }
     if (d.mode === 'move' && d.hoverTrackId) {
       dispatch('클립 트랙 이동', (p) => moveClipToTrack(p, d.clipId, d.hoverTrackId!, d.preview.start))
     } else if (d.mode === 'move' && Math.abs(d.preview.start - d.origStart) > 1e-6) {
@@ -238,7 +263,7 @@ export function Timeline(): React.JSX.Element {
               className="track-lane"
               onPointerDown={(e) => {
                 if (e.target === e.currentTarget) {
-                  select(null)
+                  clearSelection()
                   onRulerDown(e)
                 }
               }}
@@ -256,7 +281,7 @@ export function Timeline(): React.JSX.Element {
                     track={track}
                     left={start * pxPerSec} // .track-lane 자체가 헤더(120px) 뒤에서 시작 — 추가 오프셋 없음
                     width={Math.max(2, (end - start) * pxPerSec)}
-                    selected={clip.id === selectedClipId}
+                    selected={selectedClipIds.includes(clip.id)}
                     onDown={(e, mode) => beginDrag(e, mode, track, clip)}
                     onMove={onDragMove}
                     onUp={onDragEnd}

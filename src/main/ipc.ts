@@ -2,9 +2,11 @@
  * 타입 안전 IPC 핸들러 등록 (0.1.2, 0.2.3)
  * 채널 이름은 shared/ipc-types.ts 의 EditorApi 와 1:1 대응.
  */
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { SFX_LIBRARY } from '../shared/sfx'
 import { getFonts } from 'font-list'
 import { probeMedia } from './ffmpeg/probe'
 import { extractAudioWav, makeCompatProxy, makePerfProxy } from './ffmpeg/proxy'
@@ -39,6 +41,13 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('media:probe', (_e, path: string) => probeMedia(path))
+
+  // 번들 전환 효과음(phase-9) 절대경로 — 패키징=process.resourcesPath/sfx (extraResources),
+  // dev/비패키징=레포 resources/sfx (main 은 out/main/index.js 이므로 __dirname 에서 두 단계 상위)
+  ipcMain.handle('sfx:paths', () => {
+    const dir = app.isPackaged ? join(process.resourcesPath, 'sfx') : join(__dirname, '..', '..', 'resources', 'sfx')
+    return SFX_LIBRARY.map((s) => ({ id: s.id, path: join(dir, s.file) })).filter((e) => existsSync(e.path))
+  })
 
   ipcMain.handle('media:makeProxy', async (e, path: string, jobId: string) => {
     const probe = await probeMedia(path)

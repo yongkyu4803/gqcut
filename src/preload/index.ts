@@ -34,6 +34,8 @@ const api: EditorApi = {
   },
   extractAudio: (path) => ipcRenderer.invoke('media:extractAudio', path, 48000),
 
+  sfxPaths: () => ipcRenderer.invoke('sfx:paths'),
+
   saveProjectDialog: (json) => ipcRenderer.invoke('project:saveDialog', json),
   saveProject: (path, json) => ipcRenderer.invoke('project:save', path, json),
   openProjectDialog: () => ipcRenderer.invoke('project:openDialog'),

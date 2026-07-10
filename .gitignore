@@ -37,6 +37,8 @@ samples/
 *.mkv
 *.wav
 *.mp3
+# 단, 번들 전환 효과음(phase-9)은 앱 리소스라 커밋 (scripts/gen-sfx.mjs 로 생성)
+!resources/sfx/*.wav
 
 # 자동저장 / 임시 프로젝트
 *.autosave

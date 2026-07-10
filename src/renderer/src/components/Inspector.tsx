@@ -3,13 +3,15 @@
  * 색보정 필터(4.1), 클립 간 전환(4.2)
  */
 import { useEffect, useState } from 'react'
-import type { Clip, Effect, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
+import type { Clip, Effect, Project, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
+import { SFX_BY_ID, SFX_LIBRARY } from '@shared/sfx'
 import { formatTimecode } from '@shared/time'
+import { playback } from '@renderer/engine/playback'
 import { useEditor, type SilenceScope } from '@renderer/state/store'
-import { findClip, updateClip, updateSettings } from '@renderer/state/commands'
+import { findClip, updateClips, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
 import { applySilenceCut, cancelSilencePreview, detectSilence } from '@renderer/silence/autoCut'
@@ -24,19 +26,32 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
   )
 }
 
+const DEFAULT_TRANSFORM = { x: 0, y: 0, scale: 1, rotation: 0 }
+
+/** 인스펙터가 서브패널에 넘기는 setter — 단일/다중 선택 모두 동일하게 동작한다.
+ *  set: 모든 선택 클립에 같은 값(스칼라 필드). setEach: 클립별로 계산한 패치(text/effects/transform 처럼 기존 값을 병합해야 하는 필드). */
+interface ClipSetters {
+  set: (label: string, patch: Partial<Clip>) => void
+  setEach: (label: string, fn: (clip: Clip) => Partial<Clip>) => void
+}
+
 export function Inspector(): React.JSX.Element {
   const project = useEditor((s) => s.project)
-  const selectedClipId = useEditor((s) => s.selectedClipId)
+  const selectedClipIds = useEditor((s) => s.selectedClipIds)
   const dispatch = useEditor((s) => s.dispatch)
 
-  const found = selectedClipId ? findClip(project, selectedClipId) : null
+  const selectedClips = selectedClipIds.map((id) => findClip(project, id)?.clip).filter((c): c is Clip => !!c)
+  const primary = selectedClips.at(-1) ?? null
+  const primaryTrack = primary ? findClip(project, primary.id)?.track ?? null : null
+  const multi = selectedClips.length > 1
 
-  const set = (label: string, patch: Partial<Clip>): void => {
-    if (!found) return
-    dispatch(label, (p) => updateClip(p, found.clip.id, patch))
+  const setters: ClipSetters = {
+    setEach: (label, fn) => dispatch(label, (p) => updateClips(p, selectedClipIds, fn)),
+    set: (label, patch) => dispatch(label, (p) => updateClips(p, selectedClipIds, () => patch))
   }
+  const { set, setEach } = setters
 
-  if (!found) {
+  if (!primary) {
     return (
       <div className="inspector">
         <h3>프로젝트</h3>
@@ -55,37 +70,74 @@ export function Inspector(): React.JSX.Element {
     )
   }
 
-  const clip = found.clip
-  const t = clip.transform ?? { x: 0, y: 0, scale: 1, rotation: 0 }
+  const clip = primary
+  const t = clip.transform ?? DEFAULT_TRANSFORM
+  // 다중 선택 시 종류별 공통 속성만 노출 (혼합 선택 오적용 방지)
+  const every = (pred: (c: Clip) => boolean): boolean => selectedClips.every(pred)
+  const showVisual = every((c) => c.kind !== 'audio') // 불투명도/변형
+  const showFilter = every((c) => c.kind === 'video' || c.kind === 'image')
+  const showAudio = every((c) => c.kind === 'video' || c.kind === 'audio')
+  const showFade = every((c) => c.kind !== 'text')
+  const showText = every((c) => c.kind === 'text')
+
+  const kindName = (k: Clip['kind']): string => (k === 'text' ? '텍스트' : k === 'audio' ? '오디오' : '비디오')
+  const heading = multi
+    ? `${every((c) => c.kind === clip.kind) ? kindName(clip.kind) : '혼합'} 클립 ${selectedClips.length}개 선택`
+    : `${kindName(clip.kind)} 클립`
 
   return (
     <div className="inspector" data-testid="inspector">
-      <h3>{clip.kind === 'text' ? '텍스트 클립' : clip.kind === 'audio' ? '오디오 클립' : '비디오 클립'}</h3>
+      <h3 data-testid="inspector-heading">{heading}</h3>
+      {multi && <p className="hint">여러 클립에 함께 적용됩니다 (⌘Z 로 한 번에 되돌리기)</p>}
 
-      {clip.kind !== 'audio' && (
+      {showVisual && (
         <>
           <Row label="불투명도">
             <input type="range" min={0} max={1} step={0.01} value={clip.opacity ?? 1} onChange={(e) => set('불투명도', { opacity: Number(e.target.value) })} />
           </Row>
           <Row label="크기">
-            <input type="range" min={0.1} max={4} step={0.01} value={t.scale} onChange={(e) => set('크기', { transform: { ...t, scale: Number(e.target.value) } })} />
+            <input
+              type="range"
+              min={0.1}
+              max={4}
+              step={0.01}
+              value={t.scale}
+              onChange={(e) => setEach('크기', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), scale: Number(e.target.value) } }))}
+            />
           </Row>
           <Row label="회전°">
-            <input type="number" value={Math.round(t.rotation)} onChange={(e) => set('회전', { transform: { ...t, rotation: Number(e.target.value) } })} />
+            <input
+              type="number"
+              value={Math.round(t.rotation)}
+              onChange={(e) => setEach('회전', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), rotation: Number(e.target.value) } }))}
+            />
           </Row>
           <Row label="위치 X">
-            <input type="number" value={Math.round(t.x)} onChange={(e) => set('위치', { transform: { ...t, x: Number(e.target.value) } })} />
+            <input
+              type="number"
+              value={Math.round(t.x)}
+              onChange={(e) => setEach('위치', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), x: Number(e.target.value) } }))}
+            />
           </Row>
           <Row label="위치 Y">
-            <input type="number" value={Math.round(t.y)} onChange={(e) => set('위치', { transform: { ...t, y: Number(e.target.value) } })} />
+            <input
+              type="number"
+              value={Math.round(t.y)}
+              onChange={(e) => setEach('위치', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), y: Number(e.target.value) } }))}
+            />
           </Row>
         </>
       )}
 
-      {(clip.kind === 'video' || clip.kind === 'image') && <FilterPanel clip={clip} onSet={set} />}
-      {clip.kind !== 'text' && clip.kind !== 'audio' && <TransitionPanel clip={clip} track={found.track} onSet={set} />}
+      {showFilter && <FilterPanel clip={clip} setters={setters} />}
+      {showFilter &&
+        (multi ? (
+          <BatchTransitionPanel project={project} clips={selectedClips} dispatch={dispatch} />
+        ) : (
+          primaryTrack && <TransitionPanel clip={clip} track={primaryTrack} onSet={set} />
+        ))}
 
-      {(clip.kind === 'video' || clip.kind === 'audio') && (
+      {showAudio && (
         <>
           <h4>오디오</h4>
           <Row label="볼륨">
@@ -94,7 +146,7 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
-      {clip.kind !== 'text' && (
+      {showFade && (
         <>
           <h4>페이드 {clip.kind === 'audio' ? '(소리)' : clip.kind === 'image' ? '(화면)' : '(화면·소리)'}</h4>
           <Row label="페이드 인(초)">
@@ -106,11 +158,11 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
-      {clip.kind === 'video' && <CaptionPanel clip={clip} />}
+      {!multi && clip.kind === 'video' && <CaptionPanel clip={clip} />}
 
-      {clip.kind === 'video' && <SilenceCutPanel clip={clip} />}
+      {!multi && clip.kind === 'video' && <SilenceCutPanel clip={clip} />}
 
-      {clip.kind === 'text' && clip.text && <TextPanel clip={clip} text={clip.text} onSet={set} />}
+      {showText && clip.text && <TextPanel clip={clip} text={clip.text} setters={setters} />}
     </div>
   )
 }
@@ -276,17 +328,19 @@ function SilenceCutPanel({ clip }: { clip: Clip }): React.JSX.Element | null {
 }
 
 /** 색보정 필터 (4.1.3) — effects-spec 규격 기반 슬라이더, 실시간 프리뷰 반영 */
-function FilterPanel({ clip, onSet }: { clip: Clip; onSet: (label: string, patch: Partial<Clip>) => void }): React.JSX.Element {
+function FilterPanel({ clip, setters }: { clip: Clip; setters: ClipSetters }): React.JSX.Element {
   const effects = clip.effects ?? []
   const valueOf = (type: string, def: number): number => {
     const e = effects.find((x) => x.type === type)
     return e && e.enabled ? (e.params.value ?? def) : def
   }
+  // 클립별로 자기 effects 에 병합 — 다른 필터 값 보존 (다중 선택 시 primary 값으로 덮어쓰지 않음)
+  const upsert = (list: Effect[], type: string, value: number): Effect[] =>
+    list.some((e) => e.type === type)
+      ? list.map((e) => (e.type === type ? { ...e, enabled: true, params: { ...e.params, value } } : e))
+      : [...list, { type, params: { value }, enabled: true }]
   const setValue = (type: string, label: string, value: number): void => {
-    const next: Effect[] = effects.some((e) => e.type === type)
-      ? effects.map((e) => (e.type === type ? { ...e, enabled: true, params: { ...e.params, value } } : e))
-      : [...effects, { type, params: { value }, enabled: true }]
-    onSet(`필터: ${label}`, { effects: next })
+    setters.setEach(`필터: ${label}`, (c) => ({ effects: upsert(c.effects ?? [], type, value) }))
   }
   const hasAny = effects.some((e) => e.enabled)
   return (
@@ -294,7 +348,7 @@ function FilterPanel({ clip, onSet }: { clip: Clip; onSet: (label: string, patch
       <h4>
         필터{' '}
         {hasAny && (
-          <button className="mini-btn" title="필터 초기화" onClick={() => onSet('필터 초기화', { effects: [] })}>
+          <button className="mini-btn" title="필터 초기화" onClick={() => setters.set('필터 초기화', { effects: [] })}>
             ↺
           </button>
         )}
@@ -319,6 +373,56 @@ function FilterPanel({ clip, onSet }: { clip: Clip; onSet: (label: string, patch
 }
 
 /** 클립 간 전환 (4.2.3) — 다음 클립과 맞닿아 있을 때만. duration 은 두 클립 길이로 클램프 (불변식 4/7) */
+/** 전환 효과음 컨트롤 (phase-9) — 셀렉트 + 볼륨 + 미리듣기. 단일/일괄 전환 패널이 공유. */
+function SfxControls({
+  sound,
+  testIdPrefix,
+  onChange
+}: {
+  sound: Transition['sound']
+  testIdPrefix: string
+  onChange: (sound: Transition['sound']) => void
+}): React.JSX.Element {
+  const id = sound?.id
+  const def = id ? SFX_BY_ID.get(id) : undefined
+  const volume = sound?.volume ?? def?.defaultVolume ?? 0.8
+  return (
+    <>
+      <Row label="효과음">
+        <select
+          data-testid={`${testIdPrefix}-sfx`}
+          value={id ?? 'none'}
+          onChange={(e) => onChange(e.target.value === 'none' ? undefined : { id: e.target.value, volume: sound?.volume })}
+        >
+          <option value="none">없음</option>
+          {SFX_LIBRARY.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        {id && (
+          <button className="mini-btn" title="미리듣기" onClick={() => void playback.previewSfx(id, volume)}>
+            ▶
+          </button>
+        )}
+      </Row>
+      {id && (
+        <Row label="효과음 볼륨">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(e) => onChange({ id, volume: Number(e.target.value) })}
+          />
+        </Row>
+      )}
+    </>
+  )
+}
+
 function TransitionPanel({ clip, track, onSet }: { clip: Clip; track: Track; onSet: (label: string, patch: Partial<Clip>) => void }): React.JSX.Element | null {
   const sorted = [...track.clips].sort((a, b) => a.timelineStart - b.timelineStart)
   const idx = sorted.findIndex((c) => c.id === clip.id)
@@ -329,13 +433,15 @@ function TransitionPanel({ clip, track, onSet }: { clip: Clip; track: Track; onS
   const maxDur = Math.min(clip.timelineEnd - clip.timelineStart, next.timelineEnd - next.timelineStart)
   const t = clip.transitionOut
 
-  const setTransition = (patch: Partial<Transition> | null): void => {
+  const setTransition = (patch: Partial<Transition> | null, label = '전환 설정'): void => {
     if (patch === null) {
       onSet('전환 제거', { transitionOut: undefined })
     } else {
-      const merged: Transition = { type: t?.type ?? 'dissolve', duration: t?.duration ?? Math.min(1, maxDur), ...patch }
+      // 기존 전환을 스프레드해 sound/params 등 다른 필드를 보존한 뒤 패치 적용
+      const base: Transition = t ?? { type: 'dissolve', duration: Math.min(1, maxDur) }
+      const merged: Transition = { ...base, ...patch }
       merged.duration = Math.min(Math.max(0.1, merged.duration), maxDur)
-      onSet('전환 설정', { transitionOut: merged })
+      onSet(label, { transitionOut: merged })
     }
   }
 
@@ -357,24 +463,132 @@ function TransitionPanel({ clip, track, onSet }: { clip: Clip; track: Track; onS
         </select>
       </Row>
       {t && (
-        <Row label="길이(초)">
-          <input
-            type="number"
-            min={0.1}
-            max={maxDur}
-            step={0.1}
-            value={t.duration}
-            onChange={(e) => setTransition({ duration: Number(e.target.value) })}
-          />
-        </Row>
+        <>
+          <Row label="길이(초)">
+            <input
+              type="number"
+              min={0.1}
+              max={maxDur}
+              step={0.1}
+              value={t.duration}
+              onChange={(e) => setTransition({ duration: Number(e.target.value) })}
+            />
+          </Row>
+          <SfxControls sound={t.sound} testIdPrefix="transition" onChange={(sound) => setTransition({ sound }, '전환 효과음')} />
+        </>
       )}
     </>
   )
 }
 
-function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet: (label: string, patch: Partial<Clip>) => void }): React.JSX.Element {
+/** 선택 클립의 다음-인접 정보 — 전환은 다음 클립과 맞닿아 있을 때만 유효(불변식 §6) */
+function nextAdjacency(project: Project, clip: Clip): { maxDur: number } | null {
+  const found = findClip(project, clip.id)
+  if (!found) return null
+  const sorted = [...found.track.clips].sort((a, b) => a.timelineStart - b.timelineStart)
+  const idx = sorted.findIndex((c) => c.id === clip.id)
+  const next = idx >= 0 ? sorted[idx + 1] : undefined
+  if (!next || Math.abs(next.timelineStart - clip.timelineEnd) >= 1e-3) return null
+  return { maxDur: Math.min(clip.timelineEnd - clip.timelineStart, next.timelineEnd - next.timelineStart) }
+}
+
+const clampDur = (d: number, max: number): number => Math.min(Math.max(0.1, d), max)
+
+/** 전환 일괄 적용 (8.4) — 선택 클립 중 다음 컷과 인접한 것에만, duration 은 pair 별 maxDur 로 개별 클램프 */
+function BatchTransitionPanel({
+  project,
+  clips,
+  dispatch
+}: {
+  project: Project
+  clips: Clip[]
+  dispatch: (label: string, fn: (p: Project) => Project) => void
+}): React.JSX.Element {
+  const applicableIds = clips.filter((c) => nextAdjacency(project, c)).map((c) => c.id)
+  const skipped = clips.length - applicableIds.length
+  const primaryT = clips.at(-1)?.transitionOut
+  const [type, setType] = useState<string>(primaryT?.type ?? 'none')
+  const [dur, setDur] = useState<number>(primaryT?.duration ?? 1)
+  const [sound, setSound] = useState<Transition['sound']>(primaryT?.sound)
+
+  const applyType = (nextType: string): void => {
+    setType(nextType)
+    if (nextType === 'none') {
+      setSound(undefined)
+      dispatch('전환 일괄 제거', (p) => updateClips(p, applicableIds, () => ({ transitionOut: undefined })))
+    } else {
+      dispatch('전환 일괄 설정', (p) =>
+        updateClips(p, applicableIds, (c) => {
+          const info = nextAdjacency(p, c)
+          // 기존 transitionOut 을 스프레드해 효과음(sound) 등 다른 필드 보존
+          return info ? { transitionOut: { ...(c.transitionOut ?? {}), type: nextType, duration: clampDur(dur, info.maxDur) } } : {}
+        })
+      )
+    }
+  }
+  const applyDur = (nextDur: number): void => {
+    setDur(nextDur)
+    if (type === 'none') return
+    dispatch('전환 길이 일괄', (p) =>
+      updateClips(p, applicableIds, (c) => {
+        const info = nextAdjacency(p, c)
+        return info ? { transitionOut: { ...(c.transitionOut ?? {}), type, duration: clampDur(nextDur, info.maxDur) } } : {}
+      })
+    )
+  }
+  const applySound = (nextSound: Transition['sound']): void => {
+    setSound(nextSound)
+    dispatch('전환 효과음 일괄', (p) =>
+      updateClips(p, applicableIds, (c) => {
+        const info = nextAdjacency(p, c)
+        if (!info) return {}
+        // 효과음은 전환이 있어야 붙는다 — 없으면 현재 일괄 유형/길이로 전환을 생성해 붙인다
+        const base = c.transitionOut ?? (type !== 'none' ? { type, duration: clampDur(dur, info.maxDur) } : null)
+        if (!base) return {}
+        return { transitionOut: { ...base, duration: clampDur(base.duration, info.maxDur), sound: nextSound } }
+      })
+    )
+  }
+
+  return (
+    <>
+      <h4>다음 클립으로 전환 (일괄)</h4>
+      {applicableIds.length === 0 ? (
+        <p className="hint">선택한 클립 중 다음 컷과 맞닿은 것이 없어 전환을 적용할 수 없습니다.</p>
+      ) : (
+        <>
+          <Row label="유형">
+            <select data-testid="batch-transition-type" value={type} onChange={(e) => applyType(e.target.value)}>
+              <option value="none">없음</option>
+              {TRANSITION_TYPES.map((tt) => (
+                <option key={tt.type} value={tt.type}>
+                  {tt.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+          {type !== 'none' && (
+            <>
+              <Row label="길이(초)">
+                <input type="number" min={0.1} step={0.1} value={dur} onChange={(e) => applyDur(Number(e.target.value))} />
+              </Row>
+              <SfxControls sound={sound} testIdPrefix="batch-transition" onChange={applySound} />
+            </>
+          )}
+          <p className="hint">
+            {applicableIds.length}개 컷에 적용{skipped > 0 ? `, ${skipped}개는 인접 컷이 없어 제외` : ''} (길이는 각 컷 길이에 맞게 자동 조정)
+          </p>
+        </>
+      )}
+    </>
+  )
+}
+
+function TextPanel({ clip, text, setters }: { clip: Clip; text: TextContent; setters: ClipSetters }): React.JSX.Element {
   void clip
-  const setText = (label: string, patch: Partial<TextContent>): void => onSet(label, { text: { ...text, ...patch } })
+  // 클립별로 자기 text 에 변경 필드만 병합 — 다중 선택 시 각 자막의 내용·색 등 나머지 스타일 보존
+  const setText = (label: string, patch: Partial<TextContent>): void =>
+    setters.setEach(label, (c) => ({ text: { ...(c.text as TextContent), ...patch } }))
 
   // 시스템 폰트 목록(메인 프로세스 IPC 조회) — 실패 시 범용 웹세이프 폰트로 폴백
   const [fonts, setFonts] = useState<string[]>(GENERIC_FONT_FALLBACK)
@@ -432,7 +646,7 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
           value=""
           onChange={(e) => {
             const preset = TEXT_PRESETS.find((p) => p.id === e.target.value)
-            if (preset) onSet(`프리셋: ${preset.label}`, { text: applyTextPreset(text, preset) })
+            if (preset) setters.setEach(`프리셋: ${preset.label}`, (c) => ({ text: applyTextPreset(c.text as TextContent, preset) }))
           }}
         >
           <option value="" disabled>
@@ -457,7 +671,13 @@ function TextPanel({ clip, text, onSet }: { clip: Clip; text: TextContent; onSet
         </select>
       </Row>
       <Row label="크기(px)">
-        <input type="number" min={8} value={text.fontSize} onChange={(e) => setText('폰트 크기', { fontSize: Math.max(8, Number(e.target.value)) })} />
+        <input
+          type="number"
+          data-testid="text-fontsize"
+          min={8}
+          value={text.fontSize}
+          onChange={(e) => setText('폰트 크기', { fontSize: Math.max(8, Number(e.target.value)) })}
+        />
       </Row>
       <Row label="색">
         <input type="color" value={text.color} onChange={(e) => setText('폰트 색', { color: e.target.value })} />

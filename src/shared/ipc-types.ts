@@ -160,6 +160,9 @@ export interface EditorApi {
   /** 오디오 트랙을 wav 로 추출 (재생/파형/믹스다운용, 캐시됨) */
   extractAudio(path: string): Promise<string | null>
 
+  /** 번들 전환 효과음(phase-9) 절대경로 목록 — 존재하는 파일만. 렌더러가 media:// 로 로드 */
+  sfxPaths(): Promise<Array<{ id: string; path: string }>>
+
   saveProjectDialog(json: string): Promise<string | null>
   saveProject(path: string, json: string): Promise<void>
   openProjectDialog(): Promise<{ path: string; json: string } | null>

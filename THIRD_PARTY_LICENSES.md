@@ -23,6 +23,12 @@
 | onnxruntime-node (자동 자막 추론) | MIT |
 | Whisper 모델 (onnx-community/whisper-*) | 모델 가중치 MIT (OpenAI Whisper) — 첫 사용 시 다운로드, 앱에 미번들 |
 
+## 번들 에셋
+
+| 에셋 | 라이선스/출처 |
+| --- | --- |
+| 전환 효과음 `resources/sfx/*.wav` (phase-9) | 자체 절차 합성물 — 외부 음원 미사용, 저작권 제약 없음(CC0 상당). 소스: `scripts/gen-sfx.mjs` (`npm run gen:sfx` 로 재생성) |
+
 ## ⚠ 라이선스 리스크 — 상용 배포 전 결정 필요
 
 1. **GPL 전염성**: 현재 번들하는 ffmpeg-static 은 libx264 를 포함한 **GPL 빌드**다.

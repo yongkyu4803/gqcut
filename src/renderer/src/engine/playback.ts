@@ -49,6 +49,20 @@ export class PlaybackController {
     }
   }
 
+  /** 내장 전환 효과음 경로를 main 에서 받아 프리로드 (앱 시작 시 1회, phase-9) */
+  async preloadSfx(): Promise<void> {
+    const entries = await window.editor.sfxPaths()
+    const audio = this.ensureAudio(useEditor.getState().project)
+    audio.setSfxPaths(entries)
+    await audio.ensureSfxLoaded()
+  }
+
+  /** 효과음 미리듣기 (9.4.3) */
+  async previewSfx(id: string, volume: number): Promise<void> {
+    const audio = this.ensureAudio(useEditor.getState().project)
+    await audio.playSfxOnce(id, volume)
+  }
+
   async play(): Promise<void> {
     const s = useEditor.getState()
     if (s.playing) return

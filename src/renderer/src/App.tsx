@@ -37,11 +37,14 @@ export default function App(): React.JSX.Element {
         e.preventDefault()
         s.redo()
         playback.refresh()
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedClipId) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedClipIds.length > 0) {
         e.preventDefault()
-        const id = s.selectedClipId
-        s.dispatch('클립 삭제', (p) => removeClip(p, id))
-        s.select(null)
+        const ids = s.selectedClipIds
+        const label = ids.length > 1 ? `클립 ${ids.length}개 삭제` : '클립 삭제'
+        s.dispatch(label, (p) => ids.reduce((acc, id) => removeClip(acc, id), p))
+        s.clearSelection()
+      } else if (e.key === 'Escape' && s.selectedClipIds.length > 0) {
+        s.clearSelection()
       } else if ((e.key === 's' || e.key === 'c') && !mod && s.selectedClipId) {
         const id = s.selectedClipId
         s.dispatch('클립 분할', (p) => splitClip(p, id, s.playhead, genId('clip')))
@@ -73,6 +76,11 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     if (window.editor.isE2E || import.meta.env.DEV) installTestHooks()
+  }, [])
+
+  // 전환 효과음(phase-9) 번들 프리로드 — 실패해도 앱 동작에 영향 없음
+  useEffect(() => {
+    void playback.preloadSfx().catch(() => {})
   }, [])
 
   // 자동저장 (6.1.2): 30초마다 미저장 변경이 있으면 자동저장. 시작 시 복구 제안.

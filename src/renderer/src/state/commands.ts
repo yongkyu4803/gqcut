@@ -362,6 +362,25 @@ export function updateClip(p: Project, clipId: string, patch: Partial<Clip>): Pr
   }))
 }
 
+/**
+ * 여러 클립을 한 번에 갱신 (일괄 편집, phase-8). 1 dispatch = 1 undo.
+ * patch 는 클립별 함수로 계산해 "바꿀 필드만" 병합한다 — 각 클립의 기존 스타일(색/폰트 등)은 보존된다.
+ * (primary 클립의 text 객체 전체로 덮어쓰지 말 것. 반드시 clip 별 {...clip.text, ...변경} 형태로 반환.)
+ * 존재하지 않는 id 는 무시. 실제로 바뀐 클립이 없으면 원본을 그대로 반환(no-op → 히스토리 미기록).
+ */
+export function updateClips(p: Project, clipIds: string[], patch: (clip: Clip) => Partial<Clip>): Project {
+  const ids = new Set(clipIds)
+  if (ids.size === 0) return p
+  let changed = false
+  const tracks = p.tracks.map((tr) => {
+    if (!tr.clips.some((c) => ids.has(c.id))) return tr
+    changed = true
+    return { ...tr, clips: tr.clips.map((c) => (ids.has(c.id) ? { ...c, ...patch(c) } : c)) }
+  })
+  if (!changed) return p
+  return touch({ ...p, tracks })
+}
+
 export function updateTrack(p: Project, trackId: string, patch: Partial<Track>): Project {
   return mapTrack(p, trackId, (t) => ({ ...t, ...patch }))
 }

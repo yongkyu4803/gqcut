@@ -6,6 +6,12 @@ directories:
 files:
   - out/**
   - package.json
+# 번들 전환 효과음(phase-9) — asar 밖 Resources/sfx 로 복사, 런타임에 media:// 로 로드
+extraResources:
+  - from: resources/sfx
+    to: sfx
+    filter:
+      - '**/*'
 # 네이티브 바이너리/모델 런타임은 asar 밖으로 (실행/로드 가능해야 함)
 asarUnpack:
   - node_modules/ffmpeg-static/**

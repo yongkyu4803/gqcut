@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "npm run build && playwright test",
+    "gen:sfx": "node scripts/gen-sfx.mjs",
     "progress": "node scripts/progress.mjs",
     "progress:next": "node scripts/progress.mjs --next",
     "progress:all": "node scripts/progress.mjs --all",

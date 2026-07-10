@@ -4,7 +4,7 @@
     "project": "CapCut-like Desktop Video Editor",
     "version": "0.2.0",
     "createdAt": "2026-07-01",
-    "updatedAt": "2026-07-09",
+    "updatedAt": "2026-07-10",
     "targetPlatform": "Desktop (Electron + React + TypeScript)",
     "goal": "실제 배포 가능한 데스크톱 영상 편집기 제품",
     "developerLevel": "intermediate",
@@ -17,7 +17,7 @@
     "corePrinciple": "프리뷰 엔진(WebCodecs+WebGL, 실시간)과 내보내기 엔진(FFmpeg, 오프라인)을 분리하되, 이펙트/합성 결과는 양쪽이 동일해야 한다(WYSIWYG). WYSIWYG 판정은 정성 비교가 아니라 수치 기준(기준 프레임 SSIM)으로 한다.",
     "revisionNotes": "v0.2.0 (2026-07-02): (1) WebGL 컴포지터를 Phase 4에서 Phase 1.3으로 전진(Canvas2D→WebGL 재작업 제거), (2) 내보내기 파이프라인 스파이크를 Phase 1.5로 전진(WYSIWYG 구조 리스크 조기 검증), (3) 최소 오디오 재생을 1.4(A/V 싱크)에 포함(Phase 2 의존성 역전 해소), (4) 코덱 호환성 fallback을 Phase 0.4로 승격 + VFR 감지를 0.2에 추가, (5) 품질 기준 수치화(SSIM/내보내기 속도), (6) 초기 내보내기 프리셋 H.264+AAC 한정, (7) e2e 스모크(1.6)와 CI 게이트(0.1.6) 추가.",
     "usage": "각 step의 checklist 항목을 완료하면 done=true 로 바꾸고, verification.loop 를 순서대로 실행해 successCriteria 를 모두 만족해야 다음 step 으로 진행한다.",
-    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토. | 자동 자막(3.2) 구현 (2026-07-03): 엔진은 계획의 whisper.cpp 대신 @huggingface/transformers(Whisper ONNX)+onnxruntime-node 로 확정 — Electron main 에서 N-API 로 로드됨을 실측(base 한국어 정확 전사). 클립 소스구간 16kHz 추출→ASR(타임스탬프)→소스/타임라인 변환→자막 트랙 일괄 배치(단일 undo)→SRT 내보내기. 유닛 46개(자막 순수로직 9), 실제 앱에서 음성영상→자막2개 생성·프리뷰 렌더 확인. e2e/stt.spec.ts 는 RUN_STT_E2E 로 gated(모델 다운로드 무거움). 미검증: 다양한 음성/장편 정확도(육안), 패키징 후 onnxruntime asar 언팩 동작. | 무음 자동 컷(1.7, 선택) 계획 수립 (2026-07-03): FFmpeg silencedetect 로 소스 무음 감지 → 소스/타임라인 변환(패딩·병합) → 신규 ripple-delete 프리미티브로 구간 제거+이어붙이기(all-tracks 싱크 유지 기본). 파괴적이므로 리뷰 단계 필수. 미구현 — 계획만. | AI 편집 어시스턴트(phase-7) 계획 수립 (2026-07-08): 순수 커맨드 레이어를 Claude tool-use 도구(~18종)로 노출, 백엔드=Claude Agent SDK(로컬 Claude Code 구독 인증 상속, API 키 불필요·직접 OAuth 토큰 재사용은 ToS 위반이라 기각) / 렌더러=executor(1툴콜=1undo, 턴 롤백), 배포 시 API 키 프로바이더 추가 여지. computer-use(좌표 클릭)와 codegen-eval 은 기각. 검증은 모의 LLM 픽스처(CI 그린) + RUN_AI_E2E gated 실호출. 미구현 — 계획만.\n\n[2026-07-08] phase-7(AI 편집 어시스턴트) 구현. 백엔드=@anthropic-ai/claude-agent-sdk(v0.3.204) 를 메인에서 동적 import 실행 — 스파이크로 구독 인증(apiKeySource=none, Keychain OAuth) + 인프로세스 커스텀 도구 콜백 + Electron main 스폰을 실증 후 착수. 아키텍처: shared/aiTools(zod 스키마 ~19종) + shared/aiSummary(상태 요약기) 를 main/renderer/테스트가 공유. main: provider 추상화(AgentSdkProvider) — tools:[] 로 내장 도구 전면 차단, allowedTools 로 우리 도구만 자동승인(canUseTool 섀도잉 회피), settingSources:[] 격리, maxTurns:12. IPC 브리지(ai:send/ai:toolCall↔ai:toolReply/ai:event/ai:cancel): 도구 콜백을 렌더러 executor 로 왕복 중계. renderer: executor(1콜=1dispatch=1undo, 한국어 에러 순환), aiStore(채팅/확인게이트/사용량/턴롤백), RightPanel 탭[인스펙터|✦AI] + AiPanel(스트리밍/도구칩/중단/토큰비용). 파괴적(delete/remove_silence/export)·프라이버시(capture_preview)는 확인 게이트. 검증: tests/ai.test.ts(14) 스키마·요약기·executor 매핑 + e2e/ai.spec.ts non-gated(패널 렌더 + aiRunTools 실상태) + RUN_AI_E2E gated 실 API 1턴(\"2초에서 잘라줘\"→split, 7.3s 통과)로 전체 프로덕션 경로 관통 확인. 프로덕션 과제: 패키징 시 시스템 node 경로/미로그인 UX 실측, capture_preview 비전 실 API 미검증.\n\n[2026-07-09] phase-7 사고 수정(7.4) 구현. AI remove_silence 를 \"감지 전용(비파괴)\"으로 전환하고 apply_silence_cut(파괴적) 을 분리 신설 — (1) 같은 응답 내 감지→적용 연쇄 차단(silencePreview.detectedByAiRequest === 현재 run requestId 이면 거부), (2) 전체-무음 가드: 선택 구간이 클립의 ≥95%면 AI 자동 적용 거부(shared/silence.rangesCoverage 순수 함수), (3) 정보 확인 게이트(구간 수·총 초·스코프·⌘Z 안내), (4) aiStore 확인 게이트 단일 슬롯→FIFO 큐(병렬 파괴적 호출 덮어쓰기 행 제거), (5) 시스템 프롬프트에 파괴적 작업 한 응답 하나·연쇄 금지·취소 존중 규칙. 수동 인스펙터 무음 패널엔 차단 없이 전체-무음 경고 문구만 추가. 검증: tests/ai.test.ts +8(총 22): 커버리지·큐 동시성·전체무음 적용거부·부분적용·교차턴 차단/허용·미리보기부재·remove_silence 비삭제. 안전성은 결정론적 가드로 강제되어 모델 프롬프트 준수와 무관. 미완(7.4.7): 사용자 문제 미디어로 -35dB 전체-무음 감지 원인(소스 특성 vs 감지 경로) 재현은 해당 클립 필요 — 다만 전체-무음 가드로 데이터 손실은 미디어와 무관하게 차단됨.\n\n[2026-07-09] 자막 초기 생성 위치를 프리뷰 하단 가이드선에 정렬. 원인: 가이드선(engine/guides)은 하단 세이프선을 (H/2)*(1-0.1)=중앙아래 0.45H(화면 95%)에 그렸는데, 자막 생성(factory.subtitleBottomY)은 0.4H(90%)를 노려 ~54px 위에 놓였다. 수정: 세이프영역 상수를 shared/safeArea.ts(bottomSafeLineFromCenter, SAFE_MARGIN_RATIO)로 단일화하고 guides 와 factory 가 모두 이를 참조 → 텍스트 블록 하단이 가이드선에 정합. auto_captions(createSubtitleClip)·add_text(AI, position bottom 기본, center/top 옵션) 모두 하단선 사용. 검증: 유닛(subtitleBottomY+반높이 ≈ bottomSafeLineFromCenter, edgeY ±486 동일 기준) + e2e 픽셀 검증(실제 합성 프레임에서 흰 자막 하단이 0.95H ±6% 이내, 하단 15% 안)."
+    "implementationNotes": "Phase 0~3 구현 (2026-07-02): (1) 1.5 스파이크 실측 — 보이는 렌더러 OffscreenCanvas 렌더 채택, 1080p30 파이프 497MB/s, 4초 타임라인 2.0x 실시간, IPC drain 백프레셔로 충분 (ARCHITECTURE §6.1 확정). (2) 색공간 실측 — Chromium(WebCodecs→GL)은 BT.601 계열 태그를 무시하고 BT.709 로 변환 → 프록시(0.4)에서 BT.709 정규화 + 내보내기 RGB→YUV 매트릭스 BT.709 태깅으로 해결. e2e SSIM 0.983. (3) rVFC 는 video 전용이라 재생 루프는 rAF. (4) MP4 demuxer 는 mp4box.js 확정. verifying 상태 step 들은 사람의 육안/청취/장시간 검증만 남음 — npm run dev 로 확인. | Phase 4~6 구현 (2026-07-02): 필터/전환은 shared/effects-spec 단일 정의(FBO 전환 블렌딩), 오디오 믹스다운 = OfflineAudioContext 확정, WYSIWYG 수치 게이트 충족(기준 프레임 SSIM 0.9992, yuv420 정규화 비교), 내보내기 프리셋(해상도/CRF), 저장/자동저장/크래시복구/상대경로/재연결, 성능 프록시(720p 프리뷰 전용), VideoSource LRU(8), 크래시 로그/메모리 감시, electron-builder 패키징 검증(비서명 DMG/ZIP + 패키징 앱 부팅·ffmpeg 동작 확인). 미완: 6.3.2 코드사이닝/공증(Apple 인증서 필요), 3.2 STT(optional). GPL 라이선스 리스크는 THIRD_PARTY_LICENSES.md 참조 — 상용 배포 전 LGPL+HW인코더 전환 검토. | 자동 자막(3.2) 구현 (2026-07-03): 엔진은 계획의 whisper.cpp 대신 @huggingface/transformers(Whisper ONNX)+onnxruntime-node 로 확정 — Electron main 에서 N-API 로 로드됨을 실측(base 한국어 정확 전사). 클립 소스구간 16kHz 추출→ASR(타임스탬프)→소스/타임라인 변환→자막 트랙 일괄 배치(단일 undo)→SRT 내보내기. 유닛 46개(자막 순수로직 9), 실제 앱에서 음성영상→자막2개 생성·프리뷰 렌더 확인. e2e/stt.spec.ts 는 RUN_STT_E2E 로 gated(모델 다운로드 무거움). 미검증: 다양한 음성/장편 정확도(육안), 패키징 후 onnxruntime asar 언팩 동작. | 무음 자동 컷(1.7, 선택) 계획 수립 (2026-07-03): FFmpeg silencedetect 로 소스 무음 감지 → 소스/타임라인 변환(패딩·병합) → 신규 ripple-delete 프리미티브로 구간 제거+이어붙이기(all-tracks 싱크 유지 기본). 파괴적이므로 리뷰 단계 필수. 미구현 — 계획만. | AI 편집 어시스턴트(phase-7) 계획 수립 (2026-07-08): 순수 커맨드 레이어를 Claude tool-use 도구(~18종)로 노출, 백엔드=Claude Agent SDK(로컬 Claude Code 구독 인증 상속, API 키 불필요·직접 OAuth 토큰 재사용은 ToS 위반이라 기각) / 렌더러=executor(1툴콜=1undo, 턴 롤백), 배포 시 API 키 프로바이더 추가 여지. computer-use(좌표 클릭)와 codegen-eval 은 기각. 검증은 모의 LLM 픽스처(CI 그린) + RUN_AI_E2E gated 실호출. 미구현 — 계획만.\n\n[2026-07-08] phase-7(AI 편집 어시스턴트) 구현. 백엔드=@anthropic-ai/claude-agent-sdk(v0.3.204) 를 메인에서 동적 import 실행 — 스파이크로 구독 인증(apiKeySource=none, Keychain OAuth) + 인프로세스 커스텀 도구 콜백 + Electron main 스폰을 실증 후 착수. 아키텍처: shared/aiTools(zod 스키마 ~19종) + shared/aiSummary(상태 요약기) 를 main/renderer/테스트가 공유. main: provider 추상화(AgentSdkProvider) — tools:[] 로 내장 도구 전면 차단, allowedTools 로 우리 도구만 자동승인(canUseTool 섀도잉 회피), settingSources:[] 격리, maxTurns:12. IPC 브리지(ai:send/ai:toolCall↔ai:toolReply/ai:event/ai:cancel): 도구 콜백을 렌더러 executor 로 왕복 중계. renderer: executor(1콜=1dispatch=1undo, 한국어 에러 순환), aiStore(채팅/확인게이트/사용량/턴롤백), RightPanel 탭[인스펙터|✦AI] + AiPanel(스트리밍/도구칩/중단/토큰비용). 파괴적(delete/remove_silence/export)·프라이버시(capture_preview)는 확인 게이트. 검증: tests/ai.test.ts(14) 스키마·요약기·executor 매핑 + e2e/ai.spec.ts non-gated(패널 렌더 + aiRunTools 실상태) + RUN_AI_E2E gated 실 API 1턴(\"2초에서 잘라줘\"→split, 7.3s 통과)로 전체 프로덕션 경로 관통 확인. 프로덕션 과제: 패키징 시 시스템 node 경로/미로그인 UX 실측, capture_preview 비전 실 API 미검증.\n\n[2026-07-09] phase-7 사고 수정(7.4) 구현. AI remove_silence 를 \"감지 전용(비파괴)\"으로 전환하고 apply_silence_cut(파괴적) 을 분리 신설 — (1) 같은 응답 내 감지→적용 연쇄 차단(silencePreview.detectedByAiRequest === 현재 run requestId 이면 거부), (2) 전체-무음 가드: 선택 구간이 클립의 ≥95%면 AI 자동 적용 거부(shared/silence.rangesCoverage 순수 함수), (3) 정보 확인 게이트(구간 수·총 초·스코프·⌘Z 안내), (4) aiStore 확인 게이트 단일 슬롯→FIFO 큐(병렬 파괴적 호출 덮어쓰기 행 제거), (5) 시스템 프롬프트에 파괴적 작업 한 응답 하나·연쇄 금지·취소 존중 규칙. 수동 인스펙터 무음 패널엔 차단 없이 전체-무음 경고 문구만 추가. 검증: tests/ai.test.ts +8(총 22): 커버리지·큐 동시성·전체무음 적용거부·부분적용·교차턴 차단/허용·미리보기부재·remove_silence 비삭제. 안전성은 결정론적 가드로 강제되어 모델 프롬프트 준수와 무관. 미완(7.4.7): 사용자 문제 미디어로 -35dB 전체-무음 감지 원인(소스 특성 vs 감지 경로) 재현은 해당 클립 필요 — 다만 전체-무음 가드로 데이터 손실은 미디어와 무관하게 차단됨.\n\n[2026-07-09] 자막 초기 생성 위치를 프리뷰 하단 가이드선에 정렬. 원인: 가이드선(engine/guides)은 하단 세이프선을 (H/2)*(1-0.1)=중앙아래 0.45H(화면 95%)에 그렸는데, 자막 생성(factory.subtitleBottomY)은 0.4H(90%)를 노려 ~54px 위에 놓였다. 수정: 세이프영역 상수를 shared/safeArea.ts(bottomSafeLineFromCenter, SAFE_MARGIN_RATIO)로 단일화하고 guides 와 factory 가 모두 이를 참조 → 텍스트 블록 하단이 가이드선에 정합. auto_captions(createSubtitleClip)·add_text(AI, position bottom 기본, center/top 옵션) 모두 하단선 사용. 검증: 유닛(subtitleBottomY+반높이 ≈ bottomSafeLineFromCenter, edgeY ±486 동일 기준) + e2e 픽셀 검증(실제 합성 프레임에서 흰 자막 하단이 0.95H ±6% 이내, 하단 15% 안). | 다중 선택·일괄 편집(phase-8) 계획 수립 (2026-07-10): selectedClipId(단일)→selectedClipIds 배열(마지막=primary) SSOT 교체 + ⌘/Shift 클릭 선택 + 신규 순수 커맨드 updateClips(ids, patchFn — 클립별 병합으로 타 스타일 보존, 1 dispatch=1 undo) + 인스펙터 일괄 모드(텍스트 스타일/비디오 속성) + 전환 일괄(인접 pair 만, duration pair별 클램프, 스킵 안내). 그룹 드래그·마퀴·AI 일괄 도구는 선택 항목. 미구현 — 계획만. | 다중 선택·일괄 편집(phase-8) 구현 (2026-07-10): store 를 selectedClipIds:string[](SSOT)+selectedClipId(=마지막, primary 동기화 유지로 기존 단일선택 소비처 무변경) 로 확장 — select/toggleSelect(⌘)/selectRangeTo(Shift,같은트랙)/clearSelection + dispatch/undo/redo/replaceProject 에서 normalizeSelection 프루닝(유령 id 제거). Timeline.beginDrag 에 수식키 분기(⌘토글·Shift범위, 무수식은 단일; 다중선택 클립 무수식 클릭은 드래그 없으면 pointerup 에서 단일 축소), 드래그/트림은 클릭 클립만. 신규 순수커맨드 updateClips(ids, patchFn) — 클립별 병합(각자 text/effects/transform 에 변경 필드만, primary 로 덮어쓰기 금지), 1 dispatch=1 undo. 인스펙터: setters.set(스칼라 전체)/setEach(클립별) 추상화로 단일·다중 공유, 다중 헤더 개수표기+종류별 공통속성만 노출(혼합=변형/불투명도), FilterPanel/TextPanel 을 setEach 로 전환. 전환은 단일 TransitionPanel 무변경 + 신규 BatchTransitionPanel(인접 pair 만, duration pair별 클램프, 스킵 개수 안내). App Delete=선택 전체 일괄삭제(단일 undo)+Esc 해제. 검증: tests/multiSelect.test.ts(9: updateClips 병합·보존·no-op + 선택 액션·프루닝·단일 undo), e2e/multiSelect.spec.ts(⌘클릭 2개 선택→글자크기 일괄→미선택 불변→단일 undo 복원), 전체 유닛 126 그린 + smoke e2e 회귀 통과(SSIM 0.9992). 8.5(마퀴·⌘A·그룹이동)·8.6(AI 일괄 도구·aiSummary 다중표기) 는 선택 항목으로 미구현. 남은 육안 검증: 다중 전환 프리뷰 렌더. | 전환 효과음(phase-9) 계획 수립 (2026-07-10): 설계 선택 — 효과음을 Transition.sound(선언 필드)로 저장(전환 생명주기·undo 자동 상속, params 는 number-only 라 별도 필드) + scheduleProjectAudio 단일 지점 원샷 주입(프리뷰·내보내기 공유로 WYSIWYG 무료). 기각: 일반 오디오 클립 배치안(전환 이동/삭제와 동기화 어긋남). 내장 음원은 CC0 WAV 번들(extraResources + 리소스 리졸버 신설, 'sfx:{id}' 버퍼 캐시), 폴백=WebAudio 절차 생성. 내보내기 보정 2건 필요: hasAnyAudio 에 SFX 반영, 믹스다운 길이에 꼬리 포함. 타이밍 규칙: SFX 피크 = 컷 중심(transitionZone+peakOffset), 비디오 트랙 mute 시 SFX 도 끔. UI 는 단일/일괄 전환 패널에 셀렉트+볼륨+미리듣기. 미구현 — 계획만. | 전환 효과음(phase-9) 구현 (2026-07-10): 음원은 외부 CC0 대신 자체 절차 합성(scripts/gen-sfx.mjs → resources/sfx 5종: whoosh/swish/pop/click/boom, 48kHz mono 16-bit, 총 ~160KB) 으로 저작권 이슈 원천 제거·재생성 가능. shared/sfx.ts(SFX_LIBRARY+peakOffsetSec+collectSfxTriggers 순수함수). Transition.sound?:{id,volume} 옵셔널 필드(params 가 number-only 라 별도, 하위호환·스키마 v1 유지). 스케줄링은 scheduleProjectAudio 단일 지점에 원샷 주입(프리뷰 start + 내보내기 renderMixdown 공유 → WYSIWYG) — 피크=컷 중심(cut - peakOffset), 중도진입 offset 재생, muted 비디오 트랙/비인접/미등록 스킵, SFX 는 트랙게인 우회해 마스터 직결. exporter: withAudio = hasAnyAudio || triggers>0 (오디오 없는 프로젝트도 SFX 로 오디오 생성), 믹스다운 길이는 durationSec 유지(ffmpeg -shortest 가 영상 길이에 맞춰 꼬리 컷 — 별도 연장 불필요 확인). 리소스 경로: 패키징=process.resourcesPath/sfx(extraResources), dev=__dirname 기준 레포 resources/sfx(app.getAppPath 는 out/main 직접 실행 시 부정확해 기각), media:// 로 로드·'sfx:{id}' 캐시. UI: TransitionPanel(단일)/BatchTransitionPanel(일괄, phase-8) 에 효과음 셀렉트+볼륨+미리듣기(▶). setTransition 이 기존 전환을 스프레드하도록 수정(유형 변경 시 sound 보존). 검증: tests/sfx.test.ts(14: 트리거·스펙↔자산 정합·직렬화·split 시 sound 가 전환 따라 이동) + 전체 유닛 140 그린, e2e/sfx.spec.ts(sfx:paths IPC + UI 지정+undo + 내보내기 오디오 스트림 포함), smoke/multiSelect 회귀 통과. 선택 미구현: 9.2.3(AI add_transition sound 파라미터·aiSummary 표기). 남은 육안검증: 실제 효과음 청취(프리뷰/내보내기 타이밍)."
   },
   "techStack": {
     "shell": "Electron",
@@ -1277,6 +1277,390 @@
               "사고 시나리오가 회귀 테스트로 red→green 고정, 기존 105+ 테스트 그린 유지"
             ],
             "onFailure": "전체-무음 오탐이 원본에서도 재현되면 감지 경로(-ss 시킹/스트림 매핑) 점검 및 기본 임계값 하향(-40~-45dB) 검토. 교차 턴 강제가 UX 를 과도하게 막으면 \"같은 턴 적용 허용 + 게이트에 후보 체크박스 내장\" 대안으로 전환"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-8",
+      "name": "다중 선택 · 일괄 편집",
+      "goal": "타임라인에서 여러 클립(자막/비디오)을 ⌘클릭·Shift클릭으로 동시에 선택하고, 인스펙터에서 글자 크기·스타일·전환 등 속성을 한 번에(단일 undo) 적용한다. 예: 자막 5개 중 1·5번만 선택해 글자 크기 확대, 컷 여러 개 선택해 전환 일괄 지정.",
+      "estimate": "1 세션",
+      "status": "verifying",
+      "steps": [
+        {
+          "id": "8.1",
+          "name": "선택 모델 확장 (store)",
+          "description": "selectedClipId(단일 string)를 selectedClipIds: string[](클릭 순서 유지, 마지막 요소 = primary)로 SSOT 교체. 선택은 UI 상태로 히스토리 비대상 유지. 소비처가 많으므로(App 키보드/Preview 기즈모/TransportBar/Inspector/testHooks/aiSummary/executor) primary 파생 셀렉터를 제공해 기계적으로 마이그레이션한다.",
+          "status": "done",
+          "checklist": [
+            {
+              "id": "8.1.1",
+              "task": "store: selectedClipIds: string[] + 액션 — select(단일 교체)/toggleSelect(⌘)/selectRangeTo(Shift, 같은 트랙 timelineStart 순)/clearSelection, primary(마지막 요소) 파생 셀렉터",
+              "done": true
+            },
+            {
+              "id": "8.1.2",
+              "task": "dispatch/undo/redo 후 프로젝트에 더 이상 없는 클립 id 를 선택에서 프루닝(리플 삭제·AI 편집 뒤 유령 선택 방지), replaceProject 시 초기화",
+              "done": true
+            },
+            {
+              "id": "8.1.3",
+              "task": "소비처 마이그레이션: Preview 변형 기즈모·TransportBar 분할/병합 = primary 만, App Delete/Backspace = 선택 전체 삭제(단일 undo), testHooks·aiSummary(selected 다중 표기)·executor select 정리",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "유닛: 선택 액션(교체/토글/범위)과 프루닝 동작",
+              "기존 e2e 스모크로 단일 선택 회귀 확인(클릭 선택→인스펙터 표시→분할/삭제)"
+            ],
+            "successCriteria": [
+              "단일 선택 시 기존 동작과 완전히 동일(회귀 없음)",
+              "클립이 삭제/리플된 뒤 선택 목록에 유령 id 가 남지 않는다"
+            ],
+            "onFailure": "소비처 누락 시 grep selectedClipId 로 전수 재확인, 파생 셀렉터로 통일"
+          }
+        },
+        {
+          "id": "8.2",
+          "name": "타임라인 다중 선택 UX",
+          "description": "Timeline.beginDrag(무조건 select(clip.id))에 수식키 분기 추가. 드래그 이동/트림은 MVP 에선 클릭한 클립만 대상(그룹 이동은 8.5 선택 항목) — 단, 이미 선택된 클립을 누르면 선택을 유지해 어색한 해제를 막는다.",
+          "status": "done",
+          "checklist": [
+            {
+              "id": "8.2.1",
+              "task": "⌘/Ctrl+클릭 = 토글, Shift+클릭 = 같은 트랙에서 앵커(primary)~클릭 클립 사이 범위 선택, 무수식 클릭 = 단일 교체",
+              "done": true
+            },
+            {
+              "id": "8.2.2",
+              "task": "이미 선택된 클립 pointerdown 은 선택 유지(pointerup 에서 무수식이면 단일로 축소), 빈 레인 클릭·Esc = 전체 해제",
+              "done": true
+            },
+            {
+              "id": "8.2.3",
+              "task": "다중 선택 시각 표시(기존 selected 스타일 재사용) + Delete/Backspace 일괄 삭제(단일 undo, 삭제 라벨에 개수)",
+              "done": true
+            },
+            {
+              "id": "8.2.4",
+              "task": "드래그 이동/트림은 클릭 클립만 동작함을 확인(다중 선택 상태에서 오동작 없음)",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "e2e: 자막 5개 배치 → 1번 클릭 + 5번 ⌘클릭 → 두 클립만 선택 표시",
+              "e2e: Shift+클릭 범위 선택 → 연속 구간 전체 선택",
+              "e2e: 다중 선택 후 Delete → 모두 삭제, ⌘Z 한 번에 전부 복원"
+            ],
+            "successCriteria": [
+              "비연속 선택(1·5번)과 범위 선택이 모두 동작",
+              "일괄 삭제가 단일 undo 로 복원된다",
+              "다중 선택 상태에서 드래그/트림이 기존과 동일하게 안전"
+            ],
+            "onFailure": "pointer capture 와 수식키 조합 충돌 시 클릭(정지)과 드래그(이동 임계값)를 분리"
+          }
+        },
+        {
+          "id": "8.3",
+          "name": "일괄 속성 적용 (커맨드 + 인스펙터)",
+          "description": "신규 순수 커맨드 updateClips(p, ids, patchFn: (clip) => Partial<Clip>) — 클립별로 병합 패치를 계산(예: text: {...clip.text, fontSize: v})해 변경한 필드만 적용하고 각 클립의 나머지 스타일은 보존한다(primary 스타일 전체로 덮어쓰기 금지). 1 dispatch = 1 undo. 인스펙터는 다중 선택 시 일괄 모드로 전환: 컨트롤 값 표시는 primary 기준, 변경 시 선택 전체에 적용.",
+          "status": "done",
+          "checklist": [
+            {
+              "id": "8.3.1",
+              "task": "commands.updateClips(ids, patchFn) + 유닛: 부분 필드 병합·타 필드 보존·단일 히스토리 엔트리·존재하지 않는 id 무시",
+              "done": true
+            },
+            {
+              "id": "8.3.2",
+              "task": "인스펙터 다중 모드: 헤더에 '텍스트 클립 3개 선택' 등 개수 표기, kind 동종이면 해당 패널 노출, 혼합이면 공통 속성(불투명도/변형)만",
+              "done": true
+            },
+            {
+              "id": "8.3.3",
+              "task": "텍스트 일괄: 글자 크기·폰트·색·굵기/기울임·정렬·자간/행간·프리셋·애니메이션(in/out/loop) — 변경 필드만 전파",
+              "done": true
+            },
+            {
+              "id": "8.3.4",
+              "task": "비디오/이미지 일괄: 불투명도·크기·회전·위치·색보정 필터·볼륨·페이드",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "유닛: updateClips 병합 의미론(각 클립 고유 스타일 보존) 검증",
+              "e2e: 자막 5개 중 1·5번 선택 → 글자 크기 변경 → 두 클립만 fontSize 반영, 2·3·4번 불변, 1번의 색 등 다른 스타일 보존",
+              "e2e: ⌘Z 한 번으로 두 클립 모두 원복"
+            ],
+            "successCriteria": [
+              "일괄 변경이 선택 클립에만 적용되고 클립별 기존 스타일이 보존된다",
+              "일괄 변경 = 단일 undo 엔트리",
+              "혼합 선택에서 공통 속성만 노출되어 오적용이 없다"
+            ],
+            "onFailure": "text 객체 전체 스프레드로 덮어쓰는 회귀 발견 시 patchFn 경로로 강제(정적 타입으로 Partial<Clip> 직접 전달 금지)"
+          }
+        },
+        {
+          "id": "8.4",
+          "name": "전환(트랜지션) 일괄 적용",
+          "description": "transitionOut 은 '다음 클립과 인접(같은 트랙, 간극 <1e-3)'일 때만 유효(DATA-MODEL 불변식 §6 — transitionIn 은 파생이므로 이중 저장 금지). 선택 클립 중 적용 가능한 것에만 쓰고, duration 은 pair 별 maxDur(양쪽 클립 길이 최솟값)로 개별 클램프. 적용 결과를 안내한다(예: '5개 중 4개 적용 — 1개는 인접 컷 없음').",
+          "status": "verifying",
+          "checklist": [
+            {
+              "id": "8.4.1",
+              "task": "TransitionPanel 다중 모드: 유형/길이 일괄 설정, '없음' = 일괄 제거, 단일 undo",
+              "done": true
+            },
+            {
+              "id": "8.4.2",
+              "task": "pair 별 duration 클램프 + 비인접/트랙 마지막 클립 스킵 및 스킵 개수 안내",
+              "done": true
+            },
+            {
+              "id": "8.4.3",
+              "task": "유닛: 클램프·스킵·불변식 유지(assertInvariants 통과) 검증",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "e2e: 컷 5개 트랙에서 1~4번 선택 → dissolve 일괄 적용 → 각 클립 transitionOut 확인, 5번(마지막)은 스킵",
+              "프리뷰 재생으로 각 컷 경계 전환 렌더 확인(수동)",
+              "짧은 클립 포함 선택 시 duration 이 pair 별로 다르게 클램프되는지 확인"
+            ],
+            "successCriteria": [
+              "여러 컷 경계에 전환이 한 번의 조작·단일 undo 로 적용된다",
+              "비인접 클립에 transitionOut 이 생기지 않는다(불변식 위반 없음)",
+              "클램프로 인해 어떤 pair 도 클립 길이를 초과하는 전환이 없다"
+            ],
+            "onFailure": "일괄 적용 후 assertInvariants 실패 시 어긋난 pair 를 로그로 특정해 스킵 조건 보강"
+          }
+        },
+        {
+          "id": "8.5",
+          "name": "확장 선택 UX (선택)",
+          "description": "마퀴(러버밴드) 드래그 선택, ⌘A(같은 트랙 전체 선택), 다중 선택 그룹 드래그 이동(상대 간격 유지·충돌 처리). 그룹 이동은 충돌/스냅 복잡도가 높아 별도 항목으로 분리.",
+          "status": "not_started",
+          "optional": true,
+          "checklist": [
+            {
+              "id": "8.5.1",
+              "task": "빈 레인 드래그 = 마퀴 선택(교차 클립 선택), 기존 스크럽과 구분(빈 레인은 클릭=스크럽 유지, 드래그 임계값으로 분기)",
+              "done": false
+            },
+            {
+              "id": "8.5.2",
+              "task": "⌘A: 포커스/최근 선택 트랙의 클립 전체 선택",
+              "done": false
+            },
+            {
+              "id": "8.5.3",
+              "task": "그룹 드래그 이동: 선택 클립들 상대 간격 유지, 트랙 내 충돌 시 이동 거부 또는 스냅",
+              "done": false
+            }
+          ],
+          "verification": {
+            "loop": [
+              "e2e: 마퀴로 자막 3개 선택 → 일괄 크기 변경",
+              "수동: 그룹 이동 시 간격 유지·충돌 처리 확인"
+            ],
+            "successCriteria": [
+              "마퀴/⌘A 로 빠른 다중 선택 가능",
+              "그룹 이동이 겹침을 만들지 않는다"
+            ],
+            "onFailure": "그룹 이동 충돌 처리가 복잡하면 '이동 거부(원위치 복귀)' 로 단순화"
+          }
+        },
+        {
+          "id": "8.6",
+          "name": "AI 도구 확장 (선택)",
+          "description": "AI 가 같은 능력을 쓰도록 일괄 도구 노출: update_clips(복수 id + 패치)·select_clips(다중 선택). aiSummary 에 다중 선택 표기. executor 는 1 툴콜 = 1 dispatch(updateClips) = 1 undo 규약 유지.",
+          "status": "not_started",
+          "optional": true,
+          "checklist": [
+            {
+              "id": "8.6.1",
+              "task": "shared/aiTools 에 update_clips·select_clips 스키마 추가 + executor 매핑(updateClips 재사용)",
+              "done": false
+            },
+            {
+              "id": "8.6.2",
+              "task": "aiSummary: selected 다중 표기(selectedClipIds) 반영",
+              "done": false
+            },
+            {
+              "id": "8.6.3",
+              "task": "tests/ai.test.ts 에 일괄 도구 매핑·단일 undo 유닛 추가",
+              "done": false
+            }
+          ],
+          "verification": {
+            "loop": [
+              "유닛: update_clips 실행 → 단일 히스토리 엔트리",
+              "RUN_AI_E2E gated: '첫 번째와 마지막 자막 글자 키워줘' 1턴 실행"
+            ],
+            "successCriteria": [
+              "AI 일괄 편집이 단일 undo 로 롤백 가능",
+              "요약에 다중 선택이 정확히 표기"
+            ],
+            "onFailure": "모델이 개별 update_clip 을 반복 호출하면 시스템 프롬프트에 일괄 도구 우선 규칙 추가"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-9",
+      "name": "전환 효과음 (SFX)",
+      "goal": "화면 전환(transitionOut)에 심플한 효과음(휙/슉 등)을 붙인다. 전환 데이터에 선언적으로 저장하고, 프리뷰·내보내기가 공유하는 오디오 스케줄러 한 곳에서 재생해 WYSIWYG 를 유지한다. phase-8 일괄 패널에서 여러 컷에 한 번에 지정 가능.",
+      "estimate": "1 세션",
+      "status": "verifying",
+      "steps": [
+        {
+          "id": "9.1",
+          "name": "SFX 리소스 파이프라인 (번들 + 로딩)",
+          "description": "내장 효과음 등록부(shared/sfxSpec: id·라벨·파일명·기준볼륨·peakOffset)를 단일 정의로 두고, CC0 WAV 4~6종(휙/슉/붐/딩 등)을 앱에 번들한다. electron-builder extraResources 추가 + dev/패키징 겸용 리소스 경로 리졸버(main, process.resourcesPath vs 레포 경로 — 현재 앱에 리소스 리졸버가 없어 신설). 렌더러는 기존 media:// 프로토콜로 로드, AudioEngine 버퍼 캐시는 assetId 키와 분리된 'sfx:{id}' 키로 디코드 캐시. 소스는 CC0(kenney.nl / freesound CC0 / pixabay)로 확보하고 THIRD_PARTY_LICENSES.md 에 출처 기록. (대안: 노이즈+밴드패스 스윕 절차 생성 — 파일·라이선스 불필요하나 음질 한계, 리소스 파이프라인 실패 시 폴백)",
+          "status": "done",
+          "checklist": [
+            {
+              "id": "9.1.1",
+              "task": "shared/sfxSpec.ts — SFX_LIBRARY 등록부(id/라벨/파일/기본볼륨/peakOffsetSec) + 타입",
+              "done": true
+            },
+            {
+              "id": "9.1.2",
+              "task": "CC0 WAV 확보(모노/48kHz, 각 ≤1.5s) → resources/sfx/ + electron-builder extraResources + THIRD_PARTY_LICENSES.md 출처",
+              "done": true
+            },
+            {
+              "id": "9.1.3",
+              "task": "main 리소스 경로 리졸버(dev=레포 resources/, 패키징=process.resourcesPath) + IPC 또는 preload 로 절대경로 노출",
+              "done": true
+            },
+            {
+              "id": "9.1.4",
+              "task": "AudioEngine: loadSfx(id) — media:// fetch→decode, 'sfx:{id}' 캐시, 전 SFX 프리로드(총 수백 KB)",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "dev 실행에서 SFX 버퍼 디코드 성공 로그 확인",
+              "패키징 앱(dist:mac)에서 동일 파일 로드 확인(asar 밖 extraResources 경로)",
+              "라이선스 문서에 전 파일 출처·라이선스 명시 확인"
+            ],
+            "successCriteria": [
+              "dev 와 패키징 앱 모두에서 내장 SFX 가 디코드된다",
+              "모든 번들 음원이 CC0/상용 가능 라이선스로 문서화된다"
+            ],
+            "onFailure": "extraResources 경로 문제 시 asarUnpack 방식 검토, 음원 수급 실패 시 절차 생성(WebAudio 노이즈 스윕) 폴백"
+          }
+        },
+        {
+          "id": "9.2",
+          "name": "데이터 모델 — Transition.sound",
+          "description": "Transition 에 선택 필드 sound?: { id: string; volume?: number } 추가 (params 는 Record<string,number> 라 문자열 id 를 담을 수 없어 별도 필드). transitionOut 에 얹히므로 분할 시 제거·병합·리플·이동 등 기존 전환 생명주기와 undo 를 자동 상속. 옵셔널 필드라 구버전 프로젝트 하위호환 — schemaVersion 은 1 유지(deserializeProject 마이그레이션 체인 무변경). 클립 배치안(효과음을 일반 오디오 클립으로 놓기)은 전환 이동/삭제와 어긋나는 동기화 문제로 기각 — 단 사용자가 원하면 수동으로는 여전히 가능.",
+          "status": "verifying",
+          "checklist": [
+            {
+              "id": "9.2.1",
+              "task": "types.ts Transition.sound 필드 + invariants(존재하는 SFX id 인지는 검사하지 않음 — 미존재 id 는 재생 시 무시) 검토",
+              "done": true
+            },
+            {
+              "id": "9.2.2",
+              "task": "직렬화 왕복(저장→로드) 유닛 + 구버전 프로젝트(sound 없음) 로드 확인",
+              "done": true
+            },
+            {
+              "id": "9.2.3",
+              "task": "aiSummary 클립 요약에 transitionOut.sound 표기(선택) + AI add_transition 도구 sound 파라미터(선택)",
+              "done": false
+            }
+          ],
+          "verification": {
+            "loop": [
+              "유닛: sound 있는 프로젝트 save→load 동일성",
+              "유닛: split/merge/ripple 후 전환과 함께 sound 도 제거·유지되는지"
+            ],
+            "successCriteria": [
+              "구버전 프로젝트가 그대로 열린다",
+              "전환 생명주기 연산에서 sound 가 전환과 항상 함께 움직인다"
+            ],
+            "onFailure": "생명주기 불일치 발견 시 해당 커맨드의 transitionOut 처리 지점에 sound 동반 규칙 보강"
+          }
+        },
+        {
+          "id": "9.3",
+          "name": "오디오 스케줄링 (WYSIWYG 핵심)",
+          "description": "scheduleProjectAudio 한 곳에 원샷 주입 — 프리뷰(start)와 내보내기(renderMixdown)가 같은 함수를 쓰므로 양쪽 동일 보장. 트리거 시각은 effects-spec.transitionZone 으로 계산하고 SFX 의 peakOffset 을 빼서 '효과음 피크 = 컷 중심' 정렬. 볼륨 = sound.volume × masterVolume (특정 트랙 게인에 묶지 않음 — 전환은 비디오 트랙 소속이라 비디오 트랙 mute 시 SFX 도 끔). 내보내기 보정 2건: hasAnyAudio 가 SFX 존재도 오디오로 간주, 믹스다운 길이에 마지막 SFX 꼬리 포함.",
+          "status": "done",
+          "checklist": [
+            {
+              "id": "9.3.1",
+              "task": "전환 SFX 트리거 수집 순수함수(project → [{sfxId, whenSec, gain}]) — transitionZone+peakOffset, 비인접·muted 비디오 트랙 스킵. 유닛 포함",
+              "done": true
+            },
+            {
+              "id": "9.3.2",
+              "task": "scheduleProjectAudio 에 원샷 스케줄 추가(BufferSource, fromT 이전 시작분은 offset 재생) — 프리뷰 중도 재생/시킹에서도 정확",
+              "done": true
+            },
+            {
+              "id": "9.3.3",
+              "task": "exporter: hasAnyAudio 에 SFX 반영 + 믹스다운 length 에 SFX 꼬리 포함",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "유닛: 트리거 시각 계산(피크=컷 중심, 짧은 전환 클램프, muted 스킵)",
+              "프리뷰: 컷 직전에서 재생 시작해도 효과음이 올바른 시점에 울리는지(중도 진입 offset)",
+              "내보내기: ffprobe astats 로 컷 시점 근방 오디오 에너지 상승 확인(또는 무음 소스 + SFX 만으로 내보내 오디오 스트림 존재 확인)"
+            ],
+            "successCriteria": [
+              "프리뷰와 내보내기에서 효과음 타이밍·크기가 동일하다(같은 스케줄러)",
+              "오디오 없는 프로젝트도 SFX 가 있으면 내보내기에 오디오가 포함된다",
+              "시킹/중도 재생에서 이중 재생·누락이 없다"
+            ],
+            "onFailure": "타이밍 어긋나면 rAF 이벤트 방식이 아닌 사전 스케줄 방식 유지 여부 재확인(폴링 감지 금지), 내보내기 무음이면 hasAnyAudio 경로 점검"
+          }
+        },
+        {
+          "id": "9.4",
+          "name": "UI — 전환 패널 통합 + 미리듣기",
+          "description": "TransitionPanel(단일)과 BatchTransitionPanel(일괄, phase-8)에 '효과음' 셀렉트(없음+내장 목록)·볼륨 슬라이더·미리듣기(▶) 버튼 추가. 일괄 패널에서는 적용 가능한 컷 전체에 동일 sound 지정(전환 없는 컷은 스킵 — 기존 규칙 재사용). 미리듣기는 AudioEngine 버퍼를 마스터로 즉시 1회 재생.",
+          "status": "verifying",
+          "checklist": [
+            {
+              "id": "9.4.1",
+              "task": "TransitionPanel: 효과음 셀렉트+볼륨+미리듣기 — 전환 유형이 '없음'이면 비활성",
+              "done": true
+            },
+            {
+              "id": "9.4.2",
+              "task": "BatchTransitionPanel: 동일 컨트롤 일괄 적용(단일 undo, 스킵 안내 문구 재사용)",
+              "done": true
+            },
+            {
+              "id": "9.4.3",
+              "task": "미리듣기 버튼 — 재생 중 프리뷰와 충돌 없이 단발 재생",
+              "done": true
+            }
+          ],
+          "verification": {
+            "loop": [
+              "수동: 단일/일괄 지정→재생 청취",
+              "e2e: 셀렉트 조작 → 프로젝트 JSON 에 sound 필드 반영 + 단일 undo 확인"
+            ],
+            "successCriteria": [
+              "일괄 지정이 phase-8 다중 선택과 자연스럽게 함께 동작",
+              "미리듣기가 즉시 울린다"
+            ],
+            "onFailure": "미리듣기 AudioContext suspended 상태면 resume 처리"
           }
         }
       ]
