@@ -15,6 +15,7 @@ import { applySilenceCut, cancelSilencePreview, detectSilence } from './silence/
 import { executeTool } from './ai/executor'
 import { useAi } from './ai/aiStore'
 import { summarizeProject } from '@shared/aiSummary'
+import { importSubtitlesFromSrt } from './subtitles/importSrt'
 
 export function installTestHooks(): void {
   window.__test = {
@@ -84,6 +85,11 @@ export function installTestHooks(): void {
       if (!s.selectedClipId) return
       const id = s.selectedClipId
       s.dispatch('클립 속성(e2e)', (p) => updateClip(p, id, patch))
+    },
+
+    /** SRT 자막 가져오기(feature-5) — 파일 다이얼로그 우회, 내용 직접 주입. 배치된 자막 수 반환 */
+    importSrt(content: string): number {
+      return importSubtitlesFromSrt(content)
     },
 
     /** 자동 자막 생성(3.2) — 선택된 비디오 클립에서. 생성된 자막 수 반환 */

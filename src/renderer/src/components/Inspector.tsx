@@ -11,7 +11,7 @@ import { SFX_BY_ID, SFX_LIBRARY } from '@shared/sfx'
 import { formatTimecode } from '@shared/time'
 import { playback } from '@renderer/engine/playback'
 import { useEditor, type SilenceScope } from '@renderer/state/store'
-import { findClip, updateClips, updateSettings } from '@renderer/state/commands'
+import { findClip, setClipSpeed, updateClips, updateSettings } from '@renderer/state/commands'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
 import { applySilenceCut, cancelSilencePreview, detectSilence } from '@renderer/silence/autoCut'
@@ -136,6 +136,34 @@ export function Inspector(): React.JSX.Element {
         ) : (
           primaryTrack && <TransitionPanel clip={clip} track={primaryTrack} onSet={set} />
         ))}
+
+      {!multi && (clip.kind === 'video' || clip.kind === 'audio') && (
+        <>
+          <h4>속도</h4>
+          <Row label="배속">
+            <input
+              type="number"
+              data-testid="clip-speed"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={clip.speed ?? 1}
+              onChange={(e) => dispatch('속도 변경', (p) => setClipSpeed(p, clip.id, Number(e.target.value)))}
+            />
+          </Row>
+          <Row label="프리셋">
+            {[0.5, 1, 2].map((v) => (
+              <button
+                key={v}
+                className={`mini-btn ${Math.abs((clip.speed ?? 1) - v) < 1e-6 ? 'active' : ''}`}
+                onClick={() => dispatch(`속도 ${v}x`, (p) => setClipSpeed(p, clip.id, v))}
+              >
+                {v}×
+              </button>
+            ))}
+          </Row>
+        </>
+      )}
 
       {showAudio && (
         <>

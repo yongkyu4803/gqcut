@@ -6,6 +6,7 @@ import { createProject, createTextClip, genId } from '@shared/model/factory'
 import { formatTimecode } from '@shared/time'
 import { useEditor, serializeProject, deserializeProject } from '@renderer/state/store'
 import { addClip, canMergeClip, projectDuration, splitClip, mergeClip } from '@renderer/state/commands'
+import { importSubtitlesFromSrt } from '@renderer/subtitles/importSrt'
 import { playback } from '@renderer/engine/playback'
 import { exportTimeline, type ExportSettings } from '@renderer/engine/exporter'
 import { ExportDialog } from './ExportDialog'
@@ -39,6 +40,18 @@ export function TransportBar(): React.JSX.Element {
     const clip = createTextClip(playhead, undefined, last?.transform)
     dispatch('텍스트 추가', (p) => addClip(p, track.id, clip))
     useEditor.getState().select(clip.id)
+  }
+
+  // 자막 SRT 가져오기 (feature-5)
+  const importSubtitles = async (): Promise<void> => {
+    const file = await window.editor.openSrtDialog()
+    if (!file) return
+    const n = importSubtitlesFromSrt(file.content)
+    if (n === 0) {
+      alert('가져올 자막을 찾지 못했습니다. SRT 형식을 확인하세요.')
+      return
+    }
+    playback.refresh()
   }
 
   const [showExportDialog, setShowExportDialog] = useState(false)
@@ -129,6 +142,9 @@ export function TransportBar(): React.JSX.Element {
       </button>
       <button className="btn" data-testid="add-text-btn" onClick={addText}>
         T 텍스트
+      </button>
+      <button className="btn" data-testid="import-srt-btn" onClick={() => void importSubtitles()} title="SRT 자막 파일 가져오기">
+        ⬇ 자막
       </button>
       <span className="flex-spacer" />
       <button className="btn export" data-testid="export-btn" onClick={() => setShowExportDialog(true)}>

@@ -15,6 +15,7 @@ declare global {
       captureFrame(t: number): Promise<string>
       setSelectedClip(patch: Record<string, unknown>): void
       generateCaptions(model: string, language: string): Promise<number>
+      importSrt(content: string): number
       exportTo(path: string): Promise<{ ok: boolean; error?: string; stats?: { frames: number; elapsedMs: number; mbPerSec: number } }>
       detectSilence(noiseDb: number, minDurationSec: number, scope?: 'this-track' | 'all-tracks'): Promise<number>
       toggleSilenceCandidate(id: string): void

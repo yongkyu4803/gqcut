@@ -4,7 +4,7 @@
  */
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SFX_LIBRARY } from '../shared/sfx'
 import { getFonts } from 'font-list'
@@ -168,5 +168,18 @@ export function registerIpcHandlers(): void {
     if (result.canceled || !result.filePath) return null
     await writeFile(result.filePath, content, 'utf8')
     return result.filePath
+  })
+
+  // 자막 SRT 가져오기 (feature-5)
+  ipcMain.handle('subtitles:openSrt', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openFile'],
+      filters: [{ name: '자막', extensions: ['srt'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const path = result.filePaths[0]
+    const content = await readFile(path, 'utf8')
+    return { name: path.split(/[/\\]/).pop() ?? 'subtitles.srt', content }
   })
 }

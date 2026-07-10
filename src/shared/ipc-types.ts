@@ -185,6 +185,8 @@ export interface EditorApi {
   onSttProgress(cb: (p: SttProgressEvent) => void): () => void
   /** SRT 파일 저장 다이얼로그 */
   saveSrtDialog(defaultName: string, content: string): Promise<string | null>
+  /** SRT 파일 열기 다이얼로그 → 파일 내용(feature-5). 취소 시 null */
+  openSrtDialog(): Promise<{ name: string; content: string } | null>
 
   /** 무음 감지: 클립 소스 구간에서 ffmpeg silencedetect 실행 → 무음 구간 목록. 진행률은 onSilenceProgress */
   silenceDetect(opts: SilenceDetectOptions): Promise<SilenceResult>

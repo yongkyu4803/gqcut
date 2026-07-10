@@ -59,6 +59,7 @@ const api: EditorApi = {
     return () => ipcRenderer.off('stt:progress', listener)
   },
   saveSrtDialog: (defaultName, content) => ipcRenderer.invoke('export:saveSrt', defaultName, content),
+  openSrtDialog: () => ipcRenderer.invoke('subtitles:openSrt'),
 
   silenceDetect: (opts: SilenceDetectOptions) => ipcRenderer.invoke('silence:detect', opts),
   silenceCancel: (jobId) => ipcRenderer.invoke('silence:cancel', jobId),

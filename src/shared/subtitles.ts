@@ -73,6 +73,43 @@ export function formatSrtTimestamp(sec: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)},${pad(millis, 3)}`
 }
 
+/** SRT 타임스탬프(HH:MM:SS,mmm / MM:SS.mmm 등) → 초. 파싱 불가면 null */
+export function parseSrtTimestamp(raw: string): number | null {
+  const m = /(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})/.exec(raw.trim())
+  if (!m) return null
+  const h = m[1] ? Number(m[1]) : 0
+  const min = Number(m[2])
+  const s = Number(m[3])
+  const ms = Number(m[4].padEnd(3, '0'))
+  return h * 3600 + min * 60 + s + ms / 1000
+}
+
+/**
+ * SRT 텍스트 → 자막 배치(가져오기, feature-5). 타임스탬프는 타임라인 절대시간으로 간주한다.
+ * 블록 순서/번호에 의존하지 않고 "--> 를 가진 줄"을 기준으로 파싱 — 번호 누락·CRLF·다중행 텍스트에 견고.
+ * 유효하지 않은(타임스탬프 없음·빈 텍스트·end<=start) 블록은 건너뛴다. 시작시간 순 정렬.
+ */
+export function parseSrt(content: string): SubtitlePlacement[] {
+  const blocks = content.replace(/\r\n/g, '\n').replace(/^﻿/, '').split(/\n\s*\n/)
+  const out: SubtitlePlacement[] = []
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    const tcIndex = lines.findIndex((l) => l.includes('-->'))
+    if (tcIndex === -1) continue
+    const [left, right] = lines[tcIndex].split('-->')
+    const start = parseSrtTimestamp(left ?? '')
+    const end = parseSrtTimestamp(right ?? '')
+    if (start === null || end === null || end <= start) continue
+    const text = lines
+      .slice(tcIndex + 1)
+      .join('\n')
+      .trim()
+    if (!text) continue
+    out.push({ timelineStart: start, timelineEnd: end, text })
+  }
+  return out.sort((a, b) => a.timelineStart - b.timelineStart)
+}
+
 /** 자막 배치 목록 → SRT 문자열 (내보내기 3.2.4) */
 export function placementsToSrt(items: SubtitlePlacement[]): string {
   return (

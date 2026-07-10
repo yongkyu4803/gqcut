@@ -381,6 +381,46 @@ export function updateClips(p: Project, clipIds: string[], patch: (clip: Clip) =
   return touch({ ...p, tracks })
 }
 
+/**
+ * 클립 속도 변경 (feature-4). 불변식 3(소스길이 = 타임라인길이 × speed)을 유지하려고
+ * 소스 구간은 그대로 두고 타임라인 길이를 재계산한다. 같은 트랙의 뒤 클립들은 길이 변화량(delta)만큼
+ * 함께 밀어 상대 간격·인접성을 보존(리플) — 겹침/데이터 손실 없음. 다른 트랙은 건드리지 않는다(수동 트림과 동일 철학).
+ * 소스가 없는 클립(이미지/텍스트)엔 적용하지 않는다. speed 는 0.25~4배로 클램프.
+ */
+export function setClipSpeed(p: Project, clipId: string, speed: number): Project {
+  const found = findClip(p, clipId)
+  if (!found) return p
+  const { track, clip } = found
+  if (clip.sourceIn === undefined || clip.sourceOut === undefined) return p
+  const s = Math.min(4, Math.max(0.25, speed))
+  if (Math.abs(s - (clip.speed ?? 1)) < 1e-6) return p
+  const srcLen = clip.sourceOut - clip.sourceIn
+  const oldEnd = clip.timelineEnd
+  const newLen = srcLen / s
+  const newEnd = clip.timelineStart + newLen
+  const delta = newEnd - oldEnd
+  return mapTrack(p, track.id, (t) => ({
+    ...t,
+    clips: sortClips(
+      t.clips.map((c) => {
+        if (c.id === clipId) {
+          const next: Clip = { ...c, speed: s, timelineEnd: newEnd }
+          // 전환 길이가 새 클립 길이를 넘으면 클램프 (불변식 4)
+          if (next.transitionOut && next.transitionOut.duration > newLen) {
+            next.transitionOut = { ...next.transitionOut, duration: newLen }
+          }
+          return next
+        }
+        // 뒤 클립 리플: 원래 clip 끝 이후에서 시작하는 클립만 delta 만큼 이동(상대 간격 보존)
+        if (c.timelineStart >= oldEnd - 1e-9) {
+          return { ...c, timelineStart: c.timelineStart + delta, timelineEnd: c.timelineEnd + delta }
+        }
+        return c
+      })
+    )
+  }))
+}
+
 export function updateTrack(p: Project, trackId: string, patch: Partial<Track>): Project {
   return mapTrack(p, trackId, (t) => ({ ...t, ...patch }))
 }
