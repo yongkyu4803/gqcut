@@ -52,6 +52,19 @@ export function Timeline(): React.JSX.Element {
   const duration = Math.max(projectDuration(project), 10)
   const contentW = duration * pxPerSec + 400
 
+  /** 첫 클립이 타임라인에 올라오는 순간 자동 줌아웃 — 눈금이 분 단위가 되도록 전체 길이를 한 화면에 맞춘다 */
+  const clipCount = useMemo(() => project.tracks.reduce((n, t) => n + t.clips.length, 0), [project])
+  const prevClipCount = useRef(0)
+  useEffect(() => {
+    if (prevClipCount.current === 0 && clipCount > 0) {
+      const el = scrollRef.current
+      const visibleW = (el?.clientWidth ?? 800) - HEADER_W
+      const fitPxPerSec = visibleW / Math.max(projectDuration(project), 1)
+      setZoom(fitPxPerSec)
+    }
+    prevClipCount.current = clipCount
+  }, [clipCount, project, setZoom])
+
   /** 스냅 후보: 플레이헤드 + 모든 클립 경계 (1.2.5) */
   const snapPoints = useMemo(() => {
     const pts = [0, playhead]
