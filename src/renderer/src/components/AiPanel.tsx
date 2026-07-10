@@ -88,7 +88,7 @@ export function AiPanel({ active }: { active: boolean }): React.JSX.Element {
     if (!text || running) return
     const s = useEditor.getState()
     const contextJson = JSON.stringify(
-      summarizeProject(s.project, { selectedClipId: s.selectedClipId, playhead: s.playhead })
+      summarizeProject(s.project, { selectedClipId: s.selectedClipId, selectedClipIds: s.selectedClipIds, playhead: s.playhead })
     )
     const history = useAi
       .getState()

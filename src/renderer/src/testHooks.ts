@@ -162,7 +162,7 @@ export function installTestHooks(): void {
       })
       try {
         const s = useEditor.getState()
-        const contextJson = JSON.stringify(summarizeProject(s.project, { selectedClipId: s.selectedClipId, playhead: s.playhead }))
+        const contextJson = JSON.stringify(summarizeProject(s.project, { selectedClipId: s.selectedClipId, selectedClipIds: s.selectedClipIds, playhead: s.playhead }))
         const requestId = genId('req')
         useAi.getState().pushUser(prompt)
         useAi.getState().beginAssistant(requestId)

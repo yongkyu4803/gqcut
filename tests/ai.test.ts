@@ -15,7 +15,7 @@ import { bottomSafeLineFromCenter } from '@shared/safeArea'
 import { useEditor } from '../src/renderer/src/state/store'
 import { useAi } from '../src/renderer/src/ai/aiStore'
 import { executeTool } from '../src/renderer/src/ai/executor'
-import { findClip } from '../src/renderer/src/state/commands'
+import { addClip, findClip } from '../src/renderer/src/state/commands'
 
 function projectWithVideo(): Project {
   const p = createProject()
@@ -292,5 +292,114 @@ describe('무음 컷 안전장치 (7.4 — 사고 재발 방지)', () => {
     const r = await runAuto({ name: 'apply_silence_cut', input: {} })
     expect(r.ok).toBe(true) // R1 !== R2 → 차단 안 됨
     expect(useEditor.getState().past.length).toBe(before + 1)
+  })
+})
+
+/** 인접한 두 비디오 클립 c1[0,5]/c2[5,10] — 전환·속도 테스트용 */
+function projectTwoClips(): Project {
+  const p = createProject()
+  const asset: MediaAsset = { id: 'a1', kind: 'video', path: '/tmp/clip.mp4', duration: 10, status: 'ok', hasAudio: true }
+  const videoTrackId = p.tracks.find((t) => t.kind === 'video')!.id
+  const c1 = { ...createMediaClip(asset, 0), id: 'c1', timelineStart: 0, timelineEnd: 5, sourceIn: 0, sourceOut: 5 }
+  const c2 = { ...createMediaClip(asset, 5), id: 'c2', timelineStart: 5, timelineEnd: 10, sourceIn: 5, sourceOut: 10 }
+  let out: Project = { ...p, assets: [asset] }
+  out = addClip(out, videoTrackId, c1)
+  out = addClip(out, videoTrackId, c2)
+  return out
+}
+
+describe('신규 도구: 속도/전환 효과음/SRT/다중선택/테마 (AI 전면 접근)', () => {
+  it('스키마: set_speed·import_subtitles·select_clips·set_theme·add_transition(sound)', () => {
+    expect(z.object(AI_TOOL_BY_NAME.get('set_speed')!.shape).safeParse({ clipId: 'c1', speed: 0.5 }).success).toBe(true)
+    expect(z.object(AI_TOOL_BY_NAME.get('set_speed')!.shape).safeParse({ clipId: 'c1', speed: 9 }).success).toBe(false)
+    expect(z.object(AI_TOOL_BY_NAME.get('import_subtitles')!.shape).safeParse({ srt: '1\n...' }).success).toBe(true)
+    expect(z.object(AI_TOOL_BY_NAME.get('select_clips')!.shape).safeParse({ clipIds: ['c1', 'c2'] }).success).toBe(true)
+    expect(z.object(AI_TOOL_BY_NAME.get('select_clips')!.shape).safeParse({ clipIds: [] }).success).toBe(false)
+    expect(z.object(AI_TOOL_BY_NAME.get('set_theme')!.shape).safeParse({ theme: 'light' }).success).toBe(true)
+    expect(z.object(AI_TOOL_BY_NAME.get('set_theme')!.shape).safeParse({ theme: 'sepia' }).success).toBe(false)
+    const tr = z.object(AI_TOOL_BY_NAME.get('add_transition')!.shape)
+    expect(tr.safeParse({ clipId: 'c1', type: 'dissolve', sound: 'whoosh' }).success).toBe(true)
+    expect(tr.safeParse({ clipId: 'c1', type: 'dissolve', sound: '없는효과음' }).success).toBe(false)
+  })
+
+  beforeEach(() => {
+    useEditor.getState().replaceProject(projectTwoClips())
+    useAi.getState().clear()
+  })
+
+  it('set_speed: 0.5배 → 클립 길이 2배, 뒤 클립 리플', async () => {
+    const r = await executeTool({ name: 'set_speed', input: { clipId: 'c1', speed: 0.5 } })
+    expect(r.ok).toBe(true)
+    const c1 = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(c1.speed).toBe(0.5)
+    expect(c1.timelineEnd).toBeCloseTo(10, 5) // 5 / 0.5
+    expect(findClip(useEditor.getState().project, 'c2')!.clip.timelineStart).toBeCloseTo(10, 5)
+  })
+
+  it('add_transition: 효과음 지정 + duration 클립 길이로 클램프', async () => {
+    // 짧은 클립(1.5s)으로 만들어 스키마 상한(5s) 이내 값이 클립 길이로 클램프되는지 확인
+    const p = createProject()
+    const asset: MediaAsset = { id: 'a1', kind: 'video', path: '/tmp/clip.mp4', duration: 10, status: 'ok', hasAudio: true }
+    const vt = p.tracks.find((t) => t.kind === 'video')!.id
+    let sp: Project = { ...p, assets: [asset] }
+    sp = addClip(sp, vt, { ...createMediaClip(asset, 0), id: 'c1', timelineStart: 0, timelineEnd: 1.5, sourceIn: 0, sourceOut: 1.5 })
+    sp = addClip(sp, vt, { ...createMediaClip(asset, 0), id: 'c2', timelineStart: 1.5, timelineEnd: 3, sourceIn: 1.5, sourceOut: 3 })
+    useEditor.getState().replaceProject(sp)
+    const r = await executeTool({ name: 'add_transition', input: { clipId: 'c1', type: 'dissolve', durationSec: 5, sound: 'whoosh' } })
+    expect(r.ok).toBe(true)
+    const c1 = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(c1.transitionOut?.type).toBe('dissolve')
+    expect(c1.transitionOut?.duration).toBeCloseTo(1.5, 5) // maxDur=min(1.5,1.5), 5 → 1.5 로 클램프
+    expect(c1.transitionOut?.sound?.id).toBe('whoosh')
+  })
+
+  it('add_transition: 비인접(마지막) 클립엔 거부', async () => {
+    const r = await executeTool({ name: 'add_transition', input: { clipId: 'c2', type: 'dissolve' } })
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/맞닿아/)
+    expect(findClip(useEditor.getState().project, 'c2')!.clip.transitionOut).toBeUndefined()
+  })
+
+  it('add_transition: sound=none 으로 기존 효과음 제거(전환은 유지)', async () => {
+    await executeTool({ name: 'add_transition', input: { clipId: 'c1', type: 'wipe', sound: 'pop' } })
+    const r = await executeTool({ name: 'add_transition', input: { clipId: 'c1', type: 'wipe', sound: 'none' } })
+    expect(r.ok).toBe(true)
+    const c1 = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(c1.transitionOut?.type).toBe('wipe')
+    expect(c1.transitionOut?.sound).toBeUndefined()
+  })
+
+  it('import_subtitles: SRT 파싱 → 자막 트랙 배치', async () => {
+    const srt = '1\n00:00:01,000 --> 00:00:02,000\n안녕\n\n2\n00:00:03,000 --> 00:00:04,000\n반가워'
+    const r = await executeTool({ name: 'import_subtitles', input: { srt } })
+    expect(r.ok).toBe(true)
+    const textTrack = useEditor.getState().project.tracks.find((t) => t.kind === 'text')!
+    expect(textTrack.clips.length).toBe(2)
+  })
+
+  it('select_clips: 여러 클립 다중 선택', async () => {
+    const r = await executeTool({ name: 'select_clips', input: { clipIds: ['c1', 'c2'] } })
+    expect(r.ok).toBe(true)
+    expect(new Set(useEditor.getState().selectedClipIds)).toEqual(new Set(['c1', 'c2']))
+  })
+})
+
+describe('요약기: 전환 효과음 + 다중 선택 표기', () => {
+  it('transitionSound 와 selectedClipIds 를 담는다', () => {
+    const p = projectTwoClips()
+    const withSound: Project = {
+      ...p,
+      tracks: p.tracks.map((t) =>
+        t.kind === 'video'
+          ? { ...t, clips: t.clips.map((c) => (c.id === 'c1' ? { ...c, transitionOut: { type: 'dissolve', duration: 1, sound: { id: 'whoosh' } } } : c)) }
+          : t
+      )
+    }
+    const s = summarizeProject(withSound, { selectedClipId: 'c2', selectedClipIds: ['c1', 'c2'], playhead: 0 })
+    expect(s.selectedClipIds).toEqual(['c1', 'c2'])
+    const vt = s.tracks.find((t) => t.kind === 'video')!
+    expect(vt.clips.find((c) => c.id === 'c1')!.transitionSound).toBe('whoosh')
+    // 둘 다 selected 표기
+    expect(vt.clips.filter((c) => c.selected).map((c) => c.id).sort()).toEqual(['c1', 'c2'])
   })
 })

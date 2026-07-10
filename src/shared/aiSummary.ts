@@ -11,6 +11,8 @@ import type { Clip, Project, Track } from './model/types'
 
 export interface UiState {
   selectedClipId: string | null
+  /** 다중 선택 목록 (없으면 selectedClipId 로 대체) */
+  selectedClipIds?: string[]
   playhead: number
 }
 
@@ -26,6 +28,8 @@ export interface ClipSummary {
   fadeOut?: number
   effects?: string[]
   transitionOut?: string
+  /** 전환 효과음 id (있을 때만) */
+  transitionSound?: string
   selected?: boolean
 }
 
@@ -44,6 +48,8 @@ export interface ProjectSummary {
   durationSec: number
   playheadSec: number
   selectedClipId: string | null
+  /** 다중 선택된 클립 id 목록 */
+  selectedClipIds: string[]
   assets: Array<{ id: string; kind: string; name: string; durationSec: number }>
   tracks: TrackSummary[]
 }
@@ -70,6 +76,9 @@ export function summarizeProject(project: Project, ui: UiState): ProjectSummary 
   let duration = 0
   for (const t of project.tracks) for (const c of t.clips) duration = Math.max(duration, c.timelineEnd)
 
+  const selectedIds = ui.selectedClipIds ?? (ui.selectedClipId ? [ui.selectedClipId] : [])
+  const selectedSet = new Set(selectedIds)
+
   return {
     name: project.name,
     resolution: `${project.settings.width}x${project.settings.height}`,
@@ -77,6 +86,7 @@ export function summarizeProject(project: Project, ui: UiState): ProjectSummary 
     durationSec: round2(duration),
     playheadSec: round2(ui.playhead),
     selectedClipId: ui.selectedClipId,
+    selectedClipIds: selectedIds,
     assets: project.assets.map((a) => ({
       id: a.id,
       kind: a.kind,
@@ -102,7 +112,8 @@ export function summarizeProject(project: Project, ui: UiState): ProjectSummary 
           ...(c.fadeOut ? { fadeOut: round2(c.fadeOut) } : {}),
           ...(c.effects && c.effects.length ? { effects: c.effects.filter((e) => e.enabled).map((e) => e.type) } : {}),
           ...(c.transitionOut ? { transitionOut: c.transitionOut.type } : {}),
-          ...(c.id === ui.selectedClipId ? { selected: true } : {})
+          ...(c.transitionOut?.sound ? { transitionSound: c.transitionOut.sound.id } : {}),
+          ...(selectedSet.has(c.id) ? { selected: true } : {})
         }))
     }))
   }

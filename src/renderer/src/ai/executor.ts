@@ -8,12 +8,13 @@
  *  - 파괴적(delete/remove_silence/export)·프라이버시(capture_preview) 도구는 확인 게이트를 거친다
  */
 import { z } from 'zod'
-import type { Clip, Project } from '@shared/model/types'
+import type { Clip, Project, Transition } from '@shared/model/types'
 import type { AiToolReply } from '@shared/ipc-types'
 import { AI_TOOL_BY_NAME } from '@shared/aiTools'
 import { summarizeProject } from '@shared/aiSummary'
 import { rangesCoverage } from '@shared/silence'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
+import { SFX_BY_ID } from '@shared/sfx'
 import { createMediaClip, createTextClip, createTrack, genId, subtitleBottomY } from '@shared/model/factory'
 import { useEditor } from '../state/store'
 import {
@@ -24,11 +25,14 @@ import {
   moveClip,
   moveClipToTrack,
   removeClip,
+  setClipSpeed,
   splitClip,
   trimClip,
   updateClip
 } from '../state/commands'
 import { playback } from '../engine/playback'
+import { importSubtitlesFromSrt } from '../subtitles/importSrt'
+import { applyTheme, type Theme } from '../theme'
 import { useAi } from './aiStore'
 // 고수준 도구(무음/자막/내보내기/캡처)의 무거운 의존성(WebGL/ffmpeg 경로)은 케이스 내부에서
 // 동적 import — 코어 편집 도구만 쓰는 유닛 테스트가 그 그래프를 끌어오지 않도록 한다.
@@ -82,7 +86,7 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
     // ── 조회 ──
     case 'get_project_state': {
       const s = ed()
-      const summary = summarizeProject(s.project, { selectedClipId: s.selectedClipId, playhead: s.playhead })
+      const summary = summarizeProject(s.project, { selectedClipId: s.selectedClipId, selectedClipIds: s.selectedClipIds, playhead: s.playhead })
       return ok(JSON.stringify(summary))
     }
     case 'seek': {
@@ -213,11 +217,46 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
       const idx = sorted.findIndex((c) => c.id === clipId)
       const next = sorted[idx + 1]
       const adjacent = next && Math.abs(next.timelineStart - found.clip.timelineEnd) < 1e-3
-      const duration = (input.durationSec as number | undefined) ?? 0.5
-      dispatchChange('AI: 전환', (p) => updateClip(p, clipId, { transitionOut: { type: input.type as string, duration } }))
-      return ok(
-        `${input.type} 전환(${duration}s)을 걸었습니다.` + (adjacent ? '' : ' (다음 클립과 맞닿아 있지 않아 화면에 보이지 않을 수 있습니다.)')
-      )
+      if (!adjacent) return err('이 클립은 다음 컷과 맞닿아 있지 않아 전환을 걸 수 없습니다(전환은 같은 트랙의 인접 클립 사이에만 가능).')
+      // duration 은 두 클립 길이로 클램프 (불변식 4)
+      const maxDur = Math.min(found.clip.timelineEnd - found.clip.timelineStart, next.timelineEnd - next.timelineStart)
+      const duration = Math.min(Math.max(0.1, (input.durationSec as number | undefined) ?? 0.5), maxDur)
+      // 기존 전환을 스프레드해 sound 등 보존, 요청 시 sound 갱신/제거
+      const existing = found.clip.transitionOut
+      const merged: Transition = { ...(existing ?? {}), type: input.type as string, duration }
+      const soundInput = input.sound as string | undefined
+      if (soundInput === 'none') delete merged.sound
+      else if (soundInput) merged.sound = { id: soundInput, volume: input.soundVolume as number | undefined }
+      else if (input.soundVolume !== undefined && merged.sound) merged.sound = { ...merged.sound, volume: input.soundVolume as number }
+      dispatchChange('AI: 전환', (p) => updateClip(p, clipId, { transitionOut: merged }))
+      const soundLabel = merged.sound ? `, 효과음 ${SFX_BY_ID.get(merged.sound.id)?.label ?? merged.sound.id}` : ''
+      return ok(`${input.type} 전환(${duration.toFixed(2)}s)${soundLabel}을 걸었습니다.`)
+    }
+    case 'set_speed': {
+      const clipId = input.clipId as string
+      const r = requireClip(clipId)
+      if ('error' in r) return err(r.error)
+      if (r.clip.sourceIn === undefined || r.clip.sourceOut === undefined) return err('이 클립은 속도를 바꿀 수 없습니다(비디오/오디오 클립만 가능).')
+      const speed = input.speed as number
+      const changed = dispatchChange('AI: 속도', (p) => setClipSpeed(p, clipId, speed))
+      return changed ? ok(`재생 속도를 ${speed}배로 바꿨습니다.`) : err('속도가 이미 그 값이거나 적용되지 않았습니다.')
+    }
+    case 'import_subtitles': {
+      const n = importSubtitlesFromSrt(input.srt as string)
+      if (n === 0) return err('가져올 자막을 찾지 못했습니다. SRT 형식(번호/타임스탬프/텍스트)을 확인하세요.')
+      playback.refresh()
+      return ok(`자막 ${n}개를 가져와 자막 트랙에 배치했습니다.`)
+    }
+    case 'select_clips': {
+      const ids = (input.clipIds as string[]).filter((id) => findClip(ed().project, id))
+      if (ids.length === 0) return err('선택할 수 있는 클립 id 가 없습니다.')
+      ed().clearSelection()
+      for (const id of ids) ed().toggleSelect(id)
+      return ok(`클립 ${ids.length}개를 선택했습니다.`)
+    }
+    case 'set_theme': {
+      applyTheme(input.theme as Theme)
+      return ok(`${input.theme === 'light' ? '라이트(베이지)' : '다크'} 테마로 바꿨습니다.`)
     }
     case 'set_volume_fade': {
       const clipId = input.clipId as string
