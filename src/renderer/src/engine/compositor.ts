@@ -48,11 +48,13 @@ uniform float uBrightness;
 uniform float uContrast;
 uniform float uSaturation;
 uniform float uTemperature;
+uniform vec3 uTint;
+uniform float uTintAmount;
 ${COLOR_ADJUST_GLSL}
 void main() {
   vec4 c = texture2D(uTex, vUV);
   vec3 rgb = c.a > 0.001 ? c.rgb / c.a : c.rgb;
-  rgb = applyColorAdjust(rgb, uBrightness, uContrast, uSaturation, uTemperature);
+  rgb = applyColorAdjust(rgb, uBrightness, uContrast, uSaturation, uTemperature, uTint, uTintAmount);
   gl_FragColor = vec4(rgb * c.a, c.a) * uOpacity; // premultiplied 유지
 }`
 
@@ -115,7 +117,7 @@ export class Compositor {
     }
 
     gl.useProgram(this.layerProg)
-    for (const name of ['uMatrix', 'uOpacity', 'uBrightness', 'uContrast', 'uSaturation', 'uTemperature']) {
+    for (const name of ['uMatrix', 'uOpacity', 'uBrightness', 'uContrast', 'uSaturation', 'uTemperature', 'uTint', 'uTintAmount']) {
       this.uni[name] = gl.getUniformLocation(this.layerProg, name)!
     }
     gl.useProgram(this.transProg)
@@ -260,6 +262,8 @@ export class Compositor {
     gl.uniform1f(this.uni.uContrast, adjust.contrast)
     gl.uniform1f(this.uni.uSaturation, adjust.saturation)
     gl.uniform1f(this.uni.uTemperature, adjust.temperature)
+    gl.uniform3f(this.uni.uTint, adjust.tintR, adjust.tintG, adjust.tintB)
+    gl.uniform1f(this.uni.uTintAmount, adjust.tintAmount)
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   }
 

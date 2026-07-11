@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import type { Clip, Effect, Project, TextAnimation, TextContent, Track, Transform, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
+import { applyColorPreset, COLOR_PRESETS } from '@shared/colorPresets'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
 import { SFX_BY_ID, SFX_LIBRARY } from '@shared/sfx'
@@ -391,6 +392,25 @@ function FilterPanel({ clip, setters }: { clip: Clip; setters: ClipSetters }): R
           </button>
         )}
       </h4>
+      <Row label="프리셋">
+        <select
+          data-testid="color-preset"
+          value=""
+          onChange={(e) => {
+            const preset = COLOR_PRESETS.find((p) => p.id === e.target.value)
+            if (preset) setters.setEach(`프리셋: ${preset.label}`, (c) => ({ effects: applyColorPreset(c.effects, preset) }))
+          }}
+        >
+          <option value="" disabled>
+            톤 선택…
+          </option>
+          {COLOR_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </Row>
       {FILTER_SPECS.map((spec) => {
         const p = spec.params[0]
         return (

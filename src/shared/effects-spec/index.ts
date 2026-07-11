@@ -36,15 +36,37 @@ export interface ColorAdjust {
   contrast: number
   saturation: number
   temperature: number
+  /** 톤 틴트(듀오톤) — 세피아 등 색상 프리셋용. amount=0 이면 무효과 */
+  tintR: number
+  tintG: number
+  tintB: number
+  tintAmount: number
 }
 
-export const NEUTRAL_ADJUST: ColorAdjust = { brightness: 0, contrast: 1, saturation: 1, temperature: 0 }
+export const NEUTRAL_ADJUST: ColorAdjust = {
+  brightness: 0,
+  contrast: 1,
+  saturation: 1,
+  temperature: 0,
+  tintR: 1,
+  tintG: 1,
+  tintB: 1,
+  tintAmount: 0
+}
 
 export function resolveColorAdjust(effects: Effect[] | undefined): ColorAdjust {
   const out = { ...NEUTRAL_ADJUST }
   if (!effects) return out
   for (const e of effects) {
     if (!e.enabled) continue
+    if (e.type === 'tint') {
+      const { r, g, b, amount } = e.params
+      if (r !== undefined) out.tintR = r
+      if (g !== undefined) out.tintG = g
+      if (b !== undefined) out.tintB = b
+      if (amount !== undefined) out.tintAmount = amount
+      continue
+    }
     const v = e.params.value
     if (v === undefined) continue
     if (e.type === 'brightness') out.brightness = v
@@ -56,20 +78,22 @@ export function resolveColorAdjust(effects: Effect[] | undefined): ColorAdjust {
 }
 
 export function isNeutral(a: ColorAdjust): boolean {
-  return a.brightness === 0 && a.contrast === 1 && a.saturation === 1 && a.temperature === 0
+  return a.brightness === 0 && a.contrast === 1 && a.saturation === 1 && a.temperature === 0 && a.tintAmount === 0
 }
 
 /**
  * 색보정 GLSL (4.1.2) — 프리뷰·내보내기가 같은 문자열을 컴파일한다.
  * 입력 rgb 는 straight(un-premultiplied) sRGB.
+ * 톤 틴트(uTint/uTintAmount)는 듀오톤 방식: luma 를 지정 색으로 물들여 원본과 섞는다(세피아/빈티지 등).
  */
 export const COLOR_ADJUST_GLSL = `
-vec3 applyColorAdjust(vec3 rgb, float uBrightness, float uContrast, float uSaturation, float uTemperature) {
+vec3 applyColorAdjust(vec3 rgb, float uBrightness, float uContrast, float uSaturation, float uTemperature, vec3 uTint, float uTintAmount) {
   rgb += uBrightness;
   rgb = (rgb - 0.5) * uContrast + 0.5;
   float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
   rgb = mix(vec3(luma), rgb, uSaturation);
   rgb += vec3(uTemperature, 0.0, -uTemperature) * 0.2;
+  rgb = mix(rgb, uTint * luma, uTintAmount);
   return clamp(rgb, 0.0, 1.0);
 }
 `

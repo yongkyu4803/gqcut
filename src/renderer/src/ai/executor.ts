@@ -14,6 +14,7 @@ import { AI_TOOL_BY_NAME } from '@shared/aiTools'
 import { summarizeProject } from '@shared/aiSummary'
 import { rangesCoverage } from '@shared/silence'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
+import { applyColorPreset, COLOR_PRESETS } from '@shared/colorPresets'
 import { SFX_BY_ID } from '@shared/sfx'
 import { createMediaClip, createTextClip, createTrack, genId, subtitleBottomY } from '@shared/model/factory'
 import { useEditor } from '../state/store'
@@ -207,6 +208,16 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
       const effects = [...(r.clip.effects ?? []).filter((e) => e.type !== type), { type, params: { value }, enabled: true }]
       dispatchChange('AI: 필터', (p) => updateClip(p, clipId, { effects }))
       return ok(`${type} 필터를 ${value} 로 적용했습니다.`)
+    }
+    case 'apply_color_preset': {
+      const clipId = input.clipId as string
+      const r = requireClip(clipId)
+      if ('error' in r) return err(r.error)
+      const presetId = input.preset as string
+      const preset = COLOR_PRESETS.find((p) => p.id === presetId)
+      if (!preset) return err(`알 수 없는 프리셋: ${presetId}`)
+      dispatchChange('AI: 색보정 프리셋', (p) => updateClip(p, clipId, { effects: applyColorPreset(r.clip.effects, preset) }))
+      return ok(`${preset.label} 톤을 적용했습니다.`)
     }
     case 'add_transition': {
       const clipId = input.clipId as string

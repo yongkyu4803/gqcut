@@ -11,6 +11,7 @@
 import { z } from 'zod'
 import { TRANSITION_TYPES } from './effects-spec'
 import { TEXT_PRESETS } from './textPresets'
+import { COLOR_PRESETS } from './colorPresets'
 import { SFX_LIBRARY } from './sfx'
 
 export type AiToolCategory = 'query' | 'cut' | 'text' | 'effect' | 'highlevel'
@@ -30,6 +31,7 @@ export interface AiToolSpec {
 const FILTER_TYPES = ['brightness', 'contrast', 'saturation', 'temperature'] as const
 const TRANSITION_ENUM = TRANSITION_TYPES.map((t) => t.type) as [string, ...string[]]
 const PRESET_ENUM = TEXT_PRESETS.map((p) => p.id) as [string, ...string[]]
+const COLOR_PRESET_ENUM = COLOR_PRESETS.map((p) => p.id) as [string, ...string[]]
 const TEXT_ANIM_ENUM = [
   'fade',
   'slide',
@@ -142,6 +144,15 @@ export const AI_TOOLS: AiToolSpec[] = [
       clipId: z.string().describe('clip id'),
       type: z.enum(FILTER_TYPES).describe('filter type'),
       value: z.number().describe('value (range per type)')
+    },
+    category: 'effect'
+  },
+  {
+    name: 'apply_color_preset',
+    description: "Apply a one-click color grade preset (sepia, noir/b&w, vintage, cool, warm, dramatic, or 'default' to reset). Replaces any existing filter values on the clip.",
+    shape: {
+      clipId: z.string().describe('clip id'),
+      preset: z.enum(COLOR_PRESET_ENUM).describe('preset id')
     },
     category: 'effect'
   },

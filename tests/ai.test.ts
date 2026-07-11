@@ -157,6 +157,24 @@ describe('executor 매핑 (툴콜 → 프로젝트 상태)', () => {
     expect(clip.transform?.rotation).toBe(10)
   })
 
+  it('apply_color_preset: 세피아 적용 후 다른 프리셋으로 교체 가능', async () => {
+    const r = await executeTool({ name: 'apply_color_preset', input: { clipId: 'c1', preset: 'sepia' } })
+    expect(r.ok).toBe(true)
+    let clip = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(clip.effects?.some((e) => e.type === 'tint')).toBe(true)
+
+    await executeTool({ name: 'apply_color_preset', input: { clipId: 'c1', preset: 'noir' } })
+    clip = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(clip.effects?.some((e) => e.type === 'tint')).toBe(false) // 세피아의 tint 가 교체됨
+    expect(clip.effects?.find((e) => e.type === 'saturation')?.params.value).toBe(0)
+  })
+
+  it('apply_color_preset: 존재하지 않는 clipId → 한국어 에러', async () => {
+    const r = await executeTool({ name: 'apply_color_preset', input: { clipId: 'nope', preset: 'sepia' } })
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain('찾을 수 없습니다')
+  })
+
   it('update_text_style: 프리셋 적용', async () => {
     await executeTool({ name: 'add_text', input: { value: 'A', atSec: 0 } })
     const textTrack = useEditor.getState().project.tracks.find((t) => t.kind === 'text')!
