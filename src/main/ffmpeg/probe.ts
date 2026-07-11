@@ -21,6 +21,8 @@ interface FfprobeStream {
   duration?: string
   nb_frames?: string
   color_space?: string
+  color_transfer?: string
+  color_primaries?: string
 }
 
 interface FfprobeOutput {
@@ -37,6 +39,9 @@ function parseRate(rate?: string): number | undefined {
 
 /** Chromium WebCodecs 가 일반적으로 디코딩 가능한 코덱 (OS 편차는 렌더러에서 최종 확인) */
 const LIKELY_SUPPORTED = new Set(['h264', 'vp8', 'vp9', 'av1'])
+
+/** HDR 전달함수(transfer characteristics) — PQ(HDR10 등) / HLG. 이 값이면 SDR 8비트 파이프라인에 그대로 태그만 바꿔 넣을 수 없다 */
+const HDR_TRANSFERS = new Set(['smpte2084', 'arib-std-b67'])
 
 export async function probeMedia(filePath: string): Promise<ProbeResult> {
   let parsed: FfprobeOutput
@@ -96,6 +101,11 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
   const cs = video?.color_space?.toLowerCase()
   const colorOk = !video || cs === 'bt709' || (!cs && (video.height ?? 0) >= 720)
 
+  // HDR(PQ/HLG) 판별 — 이 파이프라인은 WebGL1 8비트 SDR 고정이라, HDR 소스는 무조건
+  // 톤매핑 프록시(makeCompatProxy/makePerfProxy 의 zscale+tonemap 경로)를 거쳐야 색이 정상으로 보인다.
+  const transfer = video?.color_transfer?.toLowerCase()
+  const hdr = !!video && !!transfer && HDR_TRANSFERS.has(transfer)
+
   const videoCodec = video?.codec_name?.toLowerCase()
   return {
     path: filePath,
@@ -108,6 +118,7 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     videoCodec,
     audioCodec: audio?.codec_name,
     hasAudio: !!audio,
-    likelyWebCodecsSupported: !!videoCodec && LIKELY_SUPPORTED.has(videoCodec) && !vfr && colorOk
+    hdr,
+    likelyWebCodecsSupported: !!videoCodec && LIKELY_SUPPORTED.has(videoCodec) && !vfr && colorOk && !hdr
   }
 }

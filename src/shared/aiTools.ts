@@ -198,13 +198,14 @@ export const AI_TOOLS: AiToolSpec[] = [
   },
   {
     name: 'set_transform',
-    description: "Set a clip's position (x,y px from center), scale, rotation (deg), opacity (0..1).",
+    description: "Set a clip's position (x,y px from center), scale, rotation (deg), horizontal flip, opacity (0..1).",
     shape: {
       clipId: z.string().describe('clip id'),
       x: z.number().optional(),
       y: z.number().optional(),
       scale: z.number().min(0.01).optional(),
       rotation: z.number().optional().describe('degrees'),
+      flipH: z.boolean().optional().describe('mirror horizontally'),
       opacity: z.number().min(0).max(1).optional()
     },
     category: 'effect'

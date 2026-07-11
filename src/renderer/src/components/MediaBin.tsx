@@ -73,6 +73,7 @@ export function MediaBin(): React.JSX.Element {
               {asset.kind} · {asset.duration.toFixed(1)}s
               {asset.width ? ` · ${asset.width}×${asset.height}` : ''}
               {asset.vfr ? ' · VFR' : ''}
+              {asset.hdr ? ' · HDR→SDR' : ''}
               {asset.proxyPath ? ' · 프록시' : ''}
             </div>
             {asset.status === 'missing' ? (

@@ -237,7 +237,8 @@ export class Compositor {
 
     const t = layer.transform ?? { x: 0, y: 0, scale: 1, rotation: 0 }
     const base = layer.fitToCanvas ? Math.min(this.width / layer.srcWidth, this.height / layer.srcHeight) : 1
-    const w = layer.srcWidth * base * t.scale
+    // 좌우 반전: 회전 전 로컬 공간에서 x축 부호를 뒤집어 미러링 (회전과 조합해도 자연스럽게 합성됨)
+    const w = layer.srcWidth * base * t.scale * (t.flipH ? -1 : 1)
     const h = layer.srcHeight * base * t.scale
     const rad = (t.rotation * Math.PI) / 180
     const cos = Math.cos(rad)

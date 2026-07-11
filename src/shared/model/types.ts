@@ -41,6 +41,7 @@ export interface MediaAsset {
   vfr?: boolean // 가변 프레임레이트 여부 (프로브에서 감지)
   codec?: string
   hasAudio?: boolean
+  hdr?: boolean // HDR(PQ/HLG) 소스 여부 — 프록시 생성 시 SDR 톤매핑 적용됨 (프로브에서 감지)
   proxyPath?: string // 호환 프록시(H.264 CFR, 원본 해상도) — 프리뷰·내보내기 공용 (0.4)
   perfProxyPath?: string // 성능 프록시(저해상도) — 프리뷰 전용, 내보내기는 원본 (6.2)
   audioWavPath?: string // 추출된 오디오 wav (재생/파형/믹스다운용)
@@ -88,6 +89,7 @@ export interface Transform {
   y: number
   scale: number
   rotation: number // degree
+  flipH?: boolean // 좌우 반전 (기본 false)
 }
 
 export interface Effect {

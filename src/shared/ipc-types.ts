@@ -63,6 +63,8 @@ export interface ProbeResult {
   videoCodec?: string
   audioCodec?: string
   hasAudio: boolean
+  /** HDR(PQ/HLG) 소스 여부 — true 면 프록시 생성 시 SDR 톤매핑을 거친다 */
+  hdr?: boolean
   /** WebCodecs 로 디코딩 시도해볼 수 있는 코덱인지 (렌더러에서 최종 확인) */
   likelyWebCodecsSupported: boolean
 }

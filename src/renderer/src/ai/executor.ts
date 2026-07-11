@@ -279,12 +279,13 @@ async function run(name: string, input: Record<string, unknown>): Promise<AiTool
         x: (input.x as number | undefined) ?? base.x,
         y: (input.y as number | undefined) ?? base.y,
         scale: (input.scale as number | undefined) ?? base.scale,
-        rotation: (input.rotation as number | undefined) ?? base.rotation
+        rotation: (input.rotation as number | undefined) ?? base.rotation,
+        flipH: (input.flipH as boolean | undefined) ?? base.flipH
       }
       const patch: Partial<Clip> = { transform }
       if (input.opacity !== undefined) patch.opacity = input.opacity as number
       dispatchChange('AI: 변형', (p) => updateClip(p, clipId, patch))
-      return ok('위치/크기/회전/불투명도를 설정했습니다.')
+      return ok('위치/크기/회전/좌우반전/불투명도를 설정했습니다.')
     }
 
     // ── 고수준 (7.3) ──

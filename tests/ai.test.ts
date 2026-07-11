@@ -147,6 +147,16 @@ describe('executor 매핑 (툴콜 → 프로젝트 상태)', () => {
     expect(clip.effects?.some((e) => e.type === 'brightness' && e.params.value === 0.4)).toBe(true)
   })
 
+  it('set_transform: flipH 를 토글해도 다른 필드는 유지된다', async () => {
+    await executeTool({ name: 'set_transform', input: { clipId: 'c1', scale: 1.5, rotation: 10 } })
+    const r = await executeTool({ name: 'set_transform', input: { clipId: 'c1', flipH: true } })
+    expect(r.ok).toBe(true)
+    const clip = findClip(useEditor.getState().project, 'c1')!.clip
+    expect(clip.transform?.flipH).toBe(true)
+    expect(clip.transform?.scale).toBe(1.5) // 이전 값 보존
+    expect(clip.transform?.rotation).toBe(10)
+  })
+
   it('update_text_style: 프리셋 적용', async () => {
     await executeTool({ name: 'add_text', input: { value: 'A', atSec: 0 } })
     const textTrack = useEditor.getState().project.tracks.find((t) => t.kind === 'text')!

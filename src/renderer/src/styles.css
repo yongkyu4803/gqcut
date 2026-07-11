@@ -252,6 +252,11 @@ select {
   border-color: #b3552e;
   color: var(--warn);
 }
+.btn.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .mini-btn {
   background: var(--panel-2);
   color: var(--text-dim);

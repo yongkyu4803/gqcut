@@ -52,9 +52,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('media:makeProxy', async (e, path: string, jobId: string) => {
     const probe = await probeMedia(path)
     const sender = e.sender
-    const job = makeCompatProxy(path, probe.durationSec, Math.min(60, Math.round(probe.fps ?? 30)), (percent) => {
-      if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent, done: false })
-    })
+    const job = makeCompatProxy(
+      path,
+      probe.durationSec,
+      Math.min(60, Math.round(probe.fps ?? 30)),
+      (percent) => {
+        if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent, done: false })
+      },
+      probe.hdr
+    )
     try {
       const proxyPath = await job.promise
       if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent: 100, done: true, proxyPath })
@@ -72,9 +78,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('media:makePerfProxy', async (e, path: string, jobId: string) => {
     const probe = await probeMedia(path)
     const sender = e.sender
-    const job = makePerfProxy(path, probe.durationSec, Math.min(60, Math.round(probe.fps ?? 30)), (percent) => {
-      if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent, done: false })
-    })
+    const job = makePerfProxy(
+      path,
+      probe.durationSec,
+      Math.min(60, Math.round(probe.fps ?? 30)),
+      (percent) => {
+        if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent, done: false })
+      },
+      probe.hdr
+    )
     const proxyPath = await job.promise
     if (!sender.isDestroyed()) sender.send('media:proxyProgress', { jobId, percent: 100, done: true, proxyPath })
     return proxyPath

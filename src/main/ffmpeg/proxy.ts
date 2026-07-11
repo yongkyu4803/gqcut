@@ -28,14 +28,29 @@ export interface ProxyJob {
 }
 
 /**
+ * HDR(PQ/HLG)→SDR 톤매핑 필터 체인. zscale(libzimg)+tonemap 사용 — ffmpeg-static 6.0 에
+ * --enable-libzimg 로 번들되어 있음을 확인했다. 입력의 실제 색 태그(transfer/primaries)를
+ * zscale 이 자동 감지하므로 in-파라미터 지정 없이도 PQ/HLG 양쪽에 동일 체인이 적용된다.
+ * (프리뷰=perfProxy, 내보내기=compatProxy 둘 다 여기를 거치므로 이 한 곳만 바꾸면 WYSIWYG 유지)
+ */
+const HDR_TONEMAP_VF = 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p'
+
+/** 색공간 정규화 -vf 체인. HDR 이면 톤매핑, 아니면 기존 BT.601→709 매트릭스 정규화. scalePrefix 로 해상도 축소를 앞에 끼울 수 있다. */
+function colorNormalizeVf(hdr: boolean, scalePrefix = ''): string {
+  return hdr ? `${scalePrefix}${HDR_TONEMAP_VF}` : `${scalePrefix}scale=in_color_matrix=auto:out_color_matrix=bt709:out_range=tv`
+}
+
+/**
  * 호환 프록시 생성. onProgress 는 0~100.
  * 프록시 스펙: H.264 yuv420p, CFR(원본 avg fps 반올림 또는 30), GOP=fps(1초), faststart.
+ * hdr=true 면 색공간 정규화 대신 HDR→SDR 톤매핑을 적용한다 (WYSIWYG: 프리뷰·내보내기 모두 이 프록시를 거침).
  */
 export function makeCompatProxy(
   sourcePath: string,
   durationSec: number,
   fps: number,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  hdr = false
 ): ProxyJob {
   const outPath = join(cacheDir('proxy'), `${cacheKey(sourcePath)}.mp4`)
   if (existsSync(outPath)) {
@@ -50,8 +65,8 @@ export function makeCompatProxy(
     '-map', '0:v:0', '-map', '0:a:0?',
     '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
     '-pix_fmt', 'yuv420p',
-    // 색공간 정규화: Chromium 은 BT.601 태그를 무시하므로 프록시는 항상 BT.709 로 통일 (WYSIWYG)
-    '-vf', 'scale=in_color_matrix=auto:out_color_matrix=bt709:out_range=tv',
+    // 색공간 정규화(또는 HDR 톤매핑): Chromium 은 BT.601 태그를 무시하므로 프록시는 항상 BT.709 로 통일 (WYSIWYG)
+    '-vf', colorNormalizeVf(hdr),
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
     '-vsync', 'cfr', '-r', String(gop), // CFR 정규화 (VFR → 고정 fps)
     '-g', String(gop), '-keyint_min', String(gop),
@@ -93,12 +108,14 @@ export function makeCompatProxy(
 /**
  * 성능 프록시 (6.2.1) — 고해상도 소스를 720p 로 낮춰 프리뷰 전용으로 사용.
  * 내보내기는 원본(또는 호환 프록시)을 사용하므로 화질에 영향 없음.
+ * hdr=true 면 색공간 정규화 대신 HDR→SDR 톤매핑을 적용한다.
  */
 export function makePerfProxy(
   sourcePath: string,
   durationSec: number,
   fps: number,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  hdr = false
 ): ProxyJob {
   const outPath = join(cacheDir('perf-proxy'), `${cacheKey(sourcePath)}_720.mp4`)
   if (existsSync(outPath)) {
@@ -113,7 +130,7 @@ export function makePerfProxy(
     '-map', '0:v:0', // 프리뷰 비디오 전용 — 오디오는 wav 추출본 사용
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
     '-pix_fmt', 'yuv420p',
-    '-vf', 'scale=-2:720,scale=in_color_matrix=auto:out_color_matrix=bt709:out_range=tv',
+    '-vf', colorNormalizeVf(hdr, 'scale=-2:720,'),
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
     '-vsync', 'cfr', '-r', String(gop),
     '-g', String(gop), '-keyint_min', String(gop),

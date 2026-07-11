@@ -3,7 +3,7 @@
  * 색보정 필터(4.1), 클립 간 전환(4.2)
  */
 import { useEffect, useState } from 'react'
-import type { Clip, Effect, Project, TextAnimation, TextContent, Track, Transition } from '@shared/model/types'
+import type { Clip, Effect, Project, TextAnimation, TextContent, Track, Transform, Transition } from '@shared/model/types'
 import { FILTER_SPECS, TRANSITION_TYPES } from '@shared/effects-spec'
 import { DEFAULT_STT_LANGUAGE, STT_LANGUAGES, STT_MODEL_INFO, type SttModel } from '@shared/subtitles'
 import { applyTextPreset, TEXT_PRESETS } from '@shared/textPresets'
@@ -26,7 +26,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
   )
 }
 
-const DEFAULT_TRANSFORM = { x: 0, y: 0, scale: 1, rotation: 0 }
+const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0 }
 
 /** 인스펙터가 서브패널에 넘기는 setter — 단일/다중 선택 모두 동일하게 동작한다.
  *  set: 모든 선택 클립에 같은 값(스칼라 필드). setEach: 클립별로 계산한 패치(text/effects/transform 처럼 기존 값을 병합해야 하는 필드). */
@@ -125,6 +125,16 @@ export function Inspector(): React.JSX.Element {
               value={Math.round(t.y)}
               onChange={(e) => setEach('위치', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), y: Number(e.target.value) } }))}
             />
+          </Row>
+          <Row label="좌우 반전">
+            <button
+              type="button"
+              className={`btn small ${t.flipH ? 'active' : ''}`}
+              data-testid="flip-h-toggle"
+              onClick={() => setEach('좌우 반전', (c) => ({ transform: { ...(c.transform ?? DEFAULT_TRANSFORM), flipH: !(c.transform ?? DEFAULT_TRANSFORM).flipH } }))}
+            >
+              {t.flipH ? '켜짐' : '꺼짐'}
+            </button>
           </Row>
         </>
       )}

@@ -31,6 +31,7 @@ export async function importFile(path: string): Promise<MediaAsset> {
     vfr: probe.vfr,
     codec: probe.videoCodec ?? probe.audioCodec,
     hasAudio: probe.hasAudio,
+    hdr: probe.hdr,
     status: 'ok'
   }
   useEditor.getState().dispatch('미디어 임포트', (p) => addAsset(p, asset))
