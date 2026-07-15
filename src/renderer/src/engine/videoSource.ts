@@ -7,7 +7,7 @@
  * - 재생 시에는 pump(t) 로 논블로킹 디코딩 → displayFrame 에 최신 프레임 유지.
  * - VideoFrame 수명: 이 클래스가 소유. 새 프레임 도착 시 이전 프레임 close.
  */
-import { demuxVideo, type DemuxedVideo } from './demux'
+import { demuxVideo, mediaUrl, type DemuxedVideo } from './demux'
 
 const MAX_DECODE_QUEUE = 24
 /** B-프레임 리오더 여유: target 디코드 인덱스보다 이만큼 더 feed 해본 뒤 flush */
@@ -277,7 +277,7 @@ export function evictVideoSource(filePath: string): void {
 export function getImageBitmap(filePath: string): Promise<ImageBitmap> {
   let p = imageBitmaps.get(filePath)
   if (!p) {
-    p = fetch(`media://local${filePath.split('/').map(encodeURIComponent).join('/')}`)
+    p = fetch(mediaUrl(filePath))
       .then((r) => r.blob())
       .then((b) => createImageBitmap(b))
     p.catch(() => imageBitmaps.delete(filePath))

@@ -66,10 +66,10 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
-  // media:///absolute/path 형태의 URL 을 로컬 파일 스트림으로 응답
+  // media://local/?p=<encodeURIComponent(절대경로)> 형태의 URL 을 로컬 파일 스트림으로 응답
   protocol.handle('media', (request) => {
     const url = new URL(request.url)
-    const filePath = decodeURIComponent(url.pathname)
+    const filePath = url.searchParams.get('p') ?? ''
     return net.fetch(pathToFileURL(filePath).toString(), {
       headers: request.headers
     })
