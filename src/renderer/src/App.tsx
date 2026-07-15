@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { Preview } from './components/Preview'
 import { RightPanel } from './components/RightPanel'
@@ -13,27 +13,66 @@ import { installTestHooks } from './testHooks'
 
 let clipboard: Clip | null = null
 
+/** 실제 글자를 입력하는 필드인가 (텍스트 input / textarea / contenteditable). 여기선 단축키를 양보한다. */
+function isTextEntry(el: Element | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  if (el.isContentEditable) return true
+  if (el.tagName === 'TEXTAREA') return true
+  if (el.tagName === 'INPUT') {
+    const t = (el as HTMLInputElement).type
+    return !['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'].includes(t)
+  }
+  return false
+}
+
 export default function App(): React.JSX.Element {
   const exportProgress = useEditor((s) => s.exportProgress)
   const sttProgress = useEditor((s) => s.sttProgress)
   const silenceProgress = useEditor((s) => s.silenceProgress)
 
+  // 타임라인 높이 조절 (리사이저 드래그) — 트랙이 많아지면 늘려서 스크롤 없이 더 보기
+  const [timelineH, setTimelineH] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('timelineHeight'))
+    return saved >= 120 ? saved : 260
+  })
+  const resizeRef = useRef<{ startY: number; startH: number } | null>(null)
+  useEffect(() => {
+    localStorage.setItem('timelineHeight', String(timelineH))
+  }, [timelineH])
+  const onResizeDown = (e: React.PointerEvent): void => {
+    resizeRef.current = { startY: e.clientY, startH: timelineH }
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+  }
+  const onResizeMove = (e: React.PointerEvent): void => {
+    const r = resizeRef.current
+    if (!r) return
+    // 위로 끌면(clientY 감소) 타임라인이 커진다. 상단 영역이 최소 160px 는 남도록 상한 제한.
+    const max = Math.max(200, window.innerHeight - 160)
+    setTimelineH(Math.min(max, Math.max(120, r.startH - (e.clientY - r.startY))))
+  }
+  const onResizeUp = (): void => {
+    resizeRef.current = null
+  }
+
   // 전역 단축키 (1.2.6)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return
+      // 글자 입력 필드(텍스트 input/textarea)에서만 단축키를 양보한다.
+      // 슬라이더(range)·셀렉트·버튼 등은 조작 후에도 단축키가 살아 있도록(아래 자동 blur 와 함께).
+      if (isTextEntry(e.target as Element) || (e.target as HTMLElement)?.tagName === 'SELECT') return
       const s = useEditor.getState()
       const mod = e.metaKey || e.ctrlKey
 
+      // 글자 단축키는 e.code(물리 키)로 판정한다 — 한글 IME 가 켜져 있으면 e.key 가 'ㅊ' 등으로 바뀌어
+      // e.key === 'c' 비교가 실패하기 때문. e.code 는 자판·IME 와 무관하게 'KeyC' 로 고정.
       if (e.code === 'Space') {
         e.preventDefault()
         void playback.toggle()
-      } else if ((mod && e.key === 'z' && !e.shiftKey) || (e.key === 'r' && !mod)) {
+      } else if ((mod && e.code === 'KeyZ' && !e.shiftKey) || (e.code === 'KeyR' && !mod)) {
         e.preventDefault()
         s.undo()
         playback.refresh()
-      } else if (mod && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+      } else if (mod && e.code === 'KeyZ' && e.shiftKey) {
         e.preventDefault()
         s.redo()
         playback.refresh()
@@ -45,16 +84,16 @@ export default function App(): React.JSX.Element {
         s.clearSelection()
       } else if (e.key === 'Escape' && s.selectedClipIds.length > 0) {
         s.clearSelection()
-      } else if ((e.key === 's' || e.key === 'c') && !mod && s.selectedClipId) {
+      } else if ((e.code === 'KeyS' || e.code === 'KeyC') && !mod && s.selectedClipId) {
         const id = s.selectedClipId
         s.dispatch('클립 분할', (p) => splitClip(p, id, s.playhead, genId('clip')))
-      } else if (e.key === 'm' && !mod && s.selectedClipId) {
+      } else if (e.code === 'KeyM' && !mod && s.selectedClipId) {
         const id = s.selectedClipId
         s.dispatch('컷 병합', (p) => mergeClip(p, id))
-      } else if (mod && e.key === 'c' && s.selectedClipId) {
+      } else if (mod && e.code === 'KeyC' && s.selectedClipId) {
         const found = findClip(s.project, s.selectedClipId)
         if (found) clipboard = found.clip
-      } else if (mod && e.key === 'v' && clipboard) {
+      } else if (mod && e.code === 'KeyV' && clipboard) {
         e.preventDefault()
         const src = clipboard
         const len = src.timelineEnd - src.timelineStart
@@ -72,6 +111,25 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 슬라이더/버튼/셀렉트 조작 후 포커스가 남아 단축키를 막지 않도록 자동으로 포커스 해제.
+  // (글자 입력 필드는 제외 — 타이핑 중 포커스를 뺏으면 안 됨)
+  useEffect(() => {
+    const release = (): void => {
+      const a = document.activeElement
+      if (a && a !== document.body && !isTextEntry(a) && a instanceof HTMLElement) a.blur()
+    }
+    const onPointerUp = (): void => {
+      // 셀렉트는 값 선택이 끝난 뒤 해제되도록 다음 틱에 처리
+      setTimeout(release, 0)
+    }
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('change', onPointerUp, true)
+    return () => {
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('change', onPointerUp, true)
+    }
   }, [])
 
   useEffect(() => {
@@ -119,13 +177,20 @@ export default function App(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="app">
+    <div className="app" style={{ '--timeline-h': `${timelineH}px` } as React.CSSProperties}>
       <div className="main-row">
         <MediaBin />
         <Preview />
         <RightPanel />
       </div>
       <TransportBar />
+      <div
+        className="timeline-resizer"
+        title="드래그해서 타임라인 높이 조절"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+      />
       <Timeline />
 
       {exportProgress?.active && (

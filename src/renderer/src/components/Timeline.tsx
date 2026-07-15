@@ -418,7 +418,7 @@ function ClipBlock(props: {
   onMove: (e: React.PointerEvent) => void
   onUp: () => void
 }): React.JSX.Element {
-  const { clip, left, width, selected } = props
+  const { clip, track, left, width, selected } = props
   const project = useEditor((s) => s.project)
   const asset = clip.assetId ? project.assets.find((a) => a.id === clip.assetId) : undefined
   const label = clip.kind === 'text' ? (clip.text?.value ?? '텍스트') : (asset?.path.split('/').pop() ?? clip.kind)
@@ -435,15 +435,16 @@ function ClipBlock(props: {
       <div className="trim-handle left" onPointerDown={(e) => props.onDown(e, 'trim-start')} onPointerMove={props.onMove} onPointerUp={props.onUp} />
       <span className="clip-label">{label}</span>
       {(clip.kind === 'audio' || (clip.kind === 'video' && asset?.hasAudio)) && asset && (
-        <Waveform assetId={asset.id} clip={clip} width={width} />
+        <Waveform assetId={asset.id} clip={clip} width={width} height={TRACK_H[track.kind] - 8} />
       )}
       <div className="trim-handle right" onPointerDown={(e) => props.onDown(e, 'trim-end')} onPointerMove={props.onMove} onPointerUp={props.onUp} />
     </div>
   )
 }
 
-/** 파형 렌더 (2.1.2) — 소스 구간 [sourceIn, sourceOut] 에 해당하는 피크만 그린다 */
-function Waveform({ assetId, clip, width }: { assetId: string; clip: Clip; width: number }): React.JSX.Element | null {
+/** 파형 렌더 (2.1.2) — 소스 구간 [sourceIn, sourceOut] 에 해당하는 피크만 그린다.
+ *  클립(트랙) 높이를 꽉 채우고, 보이는 구간의 최댓값으로 정규화해 조용한 소리도 구분되게 한다. */
+function Waveform({ assetId, clip, width, height }: { assetId: string; clip: Clip; width: number; height: number }): React.JSX.Element | null {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [ready, setReady] = useState(0)
 
@@ -465,23 +466,31 @@ function Waveform({ assetId, clip, width }: { assetId: string; clip: Clip; width
     const buffer = playback.audio?.getBuffer(assetId)
     if (!canvas || !buffer) return
     const w = Math.max(4, Math.floor(width))
-    const h = canvas.height
+    const h = Math.max(8, Math.floor(height))
     canvas.width = w
+    canvas.height = h
     const ctx = canvas.getContext('2d')!
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = 'rgba(122, 226, 180, 0.85)'
+    ctx.fillStyle = 'rgba(122, 226, 180, 0.9)'
     const totalBuckets = 2000
     const peaks = computePeaks(assetId, buffer, totalBuckets)
     const dur = buffer.duration
     const s0 = (clip.sourceIn ?? 0) / dur
     const s1 = (clip.sourceOut ?? dur) / dur
+    const bucketAt = (x: number): number =>
+      Math.min(totalBuckets - 1, Math.max(0, Math.floor((s0 + (s1 - s0) * (x / w)) * totalBuckets)))
+
+    // 보이는 구간의 최댓값으로 정규화 — 게인은 과증폭(노이즈 플로어 폭발) 방지 위해 상한(12x)
+    let localMax = 0
+    for (let x = 0; x < w; x++) localMax = Math.max(localMax, peaks[bucketAt(x)] ?? 0)
+    const gain = localMax > 1e-4 ? Math.min(12, 0.92 / localMax) : 1
+
     for (let x = 0; x < w; x++) {
-      const frac = s0 + (s1 - s0) * (x / w)
-      const peak = peaks[Math.min(totalBuckets - 1, Math.floor(frac * totalBuckets))] ?? 0
-      const bar = Math.max(1, peak * h)
+      const peak = peaks[bucketAt(x)] ?? 0
+      const bar = Math.max(1, Math.min(h, peak * gain * h))
       ctx.fillRect(x, (h - bar) / 2, 1, bar)
     }
-  }, [assetId, clip.sourceIn, clip.sourceOut, width, ready])
+  }, [assetId, clip.sourceIn, clip.sourceOut, width, height, ready])
 
-  return <canvas ref={canvasRef} className="waveform" height={28} />
+  return <canvas ref={canvasRef} className="waveform" />
 }
