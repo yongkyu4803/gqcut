@@ -5,8 +5,11 @@
   "description": "CapCut 유사 데스크톱 영상 편집기",
   "main": "out/main/index.js",
   "scripts": {
+    "git-sync": "node scripts/git-sync.mjs",
+    "predev": "node scripts/git-sync.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "prestart": "node scripts/git-sync.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint src",

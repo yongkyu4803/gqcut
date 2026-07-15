@@ -83,12 +83,19 @@ export class Compositor {
     this.height = height
     canvas.width = width
     canvas.height = height
-    const gl = canvas.getContext('webgl', {
+    const glAttrs: WebGLContextAttributes = {
       alpha: false,
       antialias: false,
       preserveDrawingBuffer: true, // readPixels(내보내기)용
-      premultipliedAlpha: true
-    }) as WebGLRenderingContext | null
+      premultipliedAlpha: true,
+      failIfMajorPerformanceCaveat: false // 소프트웨어 렌더러(SwiftShader)라도 허용 — GPU 없는 Windows VM/RDP 대비
+    }
+    // 구형 ANGLE/드라이버(주로 Windows)는 표준 'webgl' 이름으로 실패하고 'experimental-webgl' 로만 얻어지는 경우가 있다.
+    // (experimental-webgl 은 온스크린 HTMLCanvasElement 만 지원 — OffscreenCanvas 내보내기 경로는 'webgl' 로 충분)
+    let gl = canvas.getContext('webgl', glAttrs) as WebGLRenderingContext | null
+    if (!gl && canvas instanceof HTMLCanvasElement) {
+      gl = canvas.getContext('experimental-webgl', glAttrs) as WebGLRenderingContext | null
+    }
     if (!gl) throw new Error('WebGL 컨텍스트를 만들 수 없습니다')
     this.gl = gl
 

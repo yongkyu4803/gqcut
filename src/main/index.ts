@@ -5,6 +5,11 @@ import { pathToFileURL } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { registerAiHandlers } from './ai'
 
+// ── GPU 블록리스트 우회 — 전 화면 합성이 WebGL(compositor) 필수라, Chromium 이 드라이버를
+//    불신해 GPU 를 차단하면 프리뷰가 통째로 빈 화면이 된다(특히 Windows 구형 Intel/AMD 드라이버·
+//    RDP·VM). 실제 GPU 는 그대로 쓰므로 정상 환경 성능은 유지된다. app ready 전에 호출해야 적용됨.
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+
 // ── 크래시 로깅 (6.2.3) — userData/logs/crash.log 에 기록 ──
 function crashLog(kind: string, detail: string): void {
   try {
