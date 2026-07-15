@@ -11,10 +11,14 @@ import {
   addAsset,
   addClip,
   addClipOverlay,
+  canDetachAudio,
+  detachAudio,
   canMergeClip,
   mergeClip,
   moveClip,
+  moveClipToNewTrack,
   moveClipToTrack,
+  reorderTrack,
   projectDuration,
   removeClip,
   removeTrack,
@@ -401,6 +405,70 @@ describe('멀티트랙 (오버레이)', () => {
     expect(moveClipToTrack(p, clipId, audioTrack.id, 0)).toBe(p)
     expect(trackAcceptsClip(audioTrack, 'video')).toBe(false)
     expect(trackAcceptsClip(overlay, 'image')).toBe(true)
+  })
+
+  it('새 트랙으로 이동: 원본 트랙 바로 위에 새 트랙을 만들어 클립을 옮긴다', () => {
+    const { p, trackId, clipId } = setup()
+    const srcIdx = p.tracks.findIndex((t) => t.id === trackId)
+    const moved = moveClipToNewTrack(p, clipId, createTrack('video'), 5)
+    // 트랙 1개 증가, 원본은 비워짐
+    expect(moved.tracks).toHaveLength(p.tracks.length + 1)
+    expect(moved.tracks.find((t) => t.id === trackId)!.clips).toHaveLength(0)
+    // 새 트랙은 원본 바로 위(앞 레이어)에 삽입되고 클립을 담는다
+    const newTrack = moved.tracks[srcIdx]
+    expect(newTrack.id).not.toBe(trackId)
+    expect(newTrack.clips).toHaveLength(1)
+    expect(newTrack.clips[0].id).toBe(clipId)
+    expect(newTrack.clips[0].timelineStart).toBeCloseTo(5)
+    expect(moved.tracks[srcIdx + 1].id).toBe(trackId)
+    expect(checkInvariants(moved)).toHaveLength(0)
+    // 종류가 안 맞으면 그대로 반환 (오디오 트랙에 비디오 클립 불가)
+    expect(moveClipToNewTrack(p, clipId, createTrack('audio'), 0)).toBe(p)
+  })
+
+  it('트랙 순서 변경: 임의 위치로 재배치하고 제자리는 no-op', () => {
+    const { p } = setup() // 기본 트랙 순서: [text, video, audio]
+    const ids = p.tracks.map((t) => t.id)
+    // 맨 아래(audio)를 맨 위(index 0 앞)로
+    const toTop = reorderTrack(p, ids[2], 0)
+    expect(toTop.tracks.map((t) => t.id)).toEqual([ids[2], ids[0], ids[1]])
+    // 맨 위(text)를 맨 아래(length)로
+    const toBottom = reorderTrack(p, ids[0], p.tracks.length)
+    expect(toBottom.tracks.map((t) => t.id)).toEqual([ids[1], ids[2], ids[0]])
+    // 제자리(자기 앞/자기 뒤)로 옮기면 변화 없음(원본 그대로 반환)
+    expect(reorderTrack(p, ids[1], 1)).toBe(p)
+    expect(reorderTrack(p, ids[1], 2)).toBe(p)
+    // 존재하지 않는 트랙 → no-op
+    expect(reorderTrack(p, 'nope', 0)).toBe(p)
+  })
+
+  it('오디오 분리: 오디오 클립 생성 + 원본 음소거 + 재분리 방지', () => {
+    const { p, clipId } = setup() // 비디오 클립 [0,10), hasAudio
+    expect(canDetachAudio(p, clipId)).toBe(true)
+    const detached = detachAudio(p, clipId, createTrack('audio'))
+    // 원본 비디오 클립은 음소거
+    expect(findClip(detached, clipId)!.clip.volume).toBe(0)
+    // 오디오 트랙에 같은 자산·구간의 오디오 클립이 생김
+    const audioClips = detached.tracks.filter((t) => t.kind === 'audio').flatMap((t) => t.clips)
+    const orig = findClip(p, clipId)!.clip
+    const detachedAudio = audioClips.find((c) => c.assetId === orig.assetId && c.kind === 'audio')
+    expect(detachedAudio).toBeTruthy()
+    expect(detachedAudio!.timelineStart).toBeCloseTo(orig.timelineStart)
+    expect(detachedAudio!.timelineEnd).toBeCloseTo(orig.timelineEnd)
+    expect(detachedAudio!.sourceIn).toBeCloseTo(orig.sourceIn!)
+    expect(detachedAudio!.sourceOut).toBeCloseTo(orig.sourceOut!)
+    expect(checkInvariants(detached)).toHaveLength(0)
+    // 이미 음소거(분리)된 클립은 다시 분리 불가 → no-op
+    expect(canDetachAudio(detached, clipId)).toBe(false)
+    expect(detachAudio(detached, clipId, createTrack('audio'))).toBe(detached)
+  })
+
+  it('오디오 분리: 빈 오디오 트랙이 있으면 재사용, 겹치면 새 트랙', () => {
+    const { p, clipId } = setup()
+    // 기본 프로젝트에 빈 오디오 트랙 1개 존재 → 재사용(트랙 수 불변)
+    const detached = detachAudio(p, clipId, createTrack('audio'))
+    expect(detached.tracks.filter((t) => t.kind === 'audio')).toHaveLength(1)
+    expect(detached.tracks).toHaveLength(p.tracks.length)
   })
 
   it('빈 트랙만 삭제 가능, 같은 종류 마지막 트랙은 유지', () => {

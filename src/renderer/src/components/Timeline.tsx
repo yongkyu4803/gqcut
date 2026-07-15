@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Clip, Track } from '@shared/model/types'
 import { createTrack } from '@shared/model/factory'
 import { useEditor } from '@renderer/state/store'
-import { addTrack, moveClip, moveClipToTrack, projectDuration, removeTrack, trackAcceptsClip, trimClip, updateTrack } from '@renderer/state/commands'
+import { addTrack, moveClip, moveClipToNewTrack, moveClipToTrack, reorderTrack, projectDuration, removeTrack, trackAcceptsClip, trimClip, updateTrack } from '@renderer/state/commands'
 import { playback } from '@renderer/engine/playback'
 import { computePeaks } from '@renderer/engine/audioEngine'
 import { formatTimecode } from '@shared/time'
@@ -28,6 +28,8 @@ interface DragState {
   preview: { start: number; end: number }
   /** 세로 드래그 대상 트랙 (move 모드, 같은 종류만) */
   hoverTrackId: string | null
+  /** 빈 공간(트랙 추가 영역)으로 드롭 중 — 새 트랙을 만들어 이동 */
+  newTrackDrop: boolean
 }
 
 export function Timeline(): React.JSX.Element {
@@ -45,6 +47,8 @@ export function Timeline(): React.JSX.Element {
   const toggleSilenceCandidate = useEditor((s) => s.toggleSilenceCandidate)
 
   const [drag, setDrag] = useState<DragState | null>(null)
+  // 트랙(타임라인) 순서 드래그 — 노션 블록처럼 그립을 잡고 위치 이동. dropIndex 는 삽입 지점(0..length).
+  const [trackDrag, setTrackDrag] = useState<{ trackId: string; dropIndex: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // 무수식 클릭으로 이미 다중선택된 클립을 눌렀을 때: 드래그 없이 pointerup 되면 단일 선택으로 축소
   const pendingCollapse = useRef<string | null>(null)
@@ -133,7 +137,8 @@ export function Timeline(): React.JSX.Element {
       origStart: clip.timelineStart,
       origEnd: clip.timelineEnd,
       preview: { start: clip.timelineStart, end: clip.timelineEnd },
-      hoverTrackId: null
+      hoverTrackId: null,
+      newTrackDrop: false
     })
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
@@ -144,12 +149,15 @@ export function Timeline(): React.JSX.Element {
     const len = drag.origEnd - drag.origStart
     if (drag.mode === 'move') {
       const start = Math.max(0, snap(drag.origStart + dt, drag.clipId))
-      // 세로 드래그: 포인터 아래의 트랙 (같은 종류만 대상)
-      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-track-id]') as HTMLElement | null
+      // 세로 드래그: 포인터 아래 요소를 확인 — 다른 트랙이면 이동, 빈 공간(트랙 추가 영역)이면 새 트랙 생성
+      const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+      const el = under?.closest('[data-track-id]') as HTMLElement | null
       const hoverId = el?.dataset.trackId ?? null
       const hoverTrack = hoverId ? project.tracks.find((t) => t.id === hoverId) : null
       const valid = hoverTrack && hoverTrack.id !== drag.trackId && trackAcceptsClip(hoverTrack, drag.clipKind)
-      setDrag({ ...drag, preview: { start, end: start + len }, hoverTrackId: valid ? hoverTrack.id : null })
+      // 트랙 위가 아니고 새-트랙 드롭 영역이면 새 트랙으로 내리기
+      const newTrackDrop = !valid && Boolean(under?.closest('[data-newtrack-drop]'))
+      setDrag({ ...drag, preview: { start, end: start + len }, hoverTrackId: valid ? hoverTrack.id : null, newTrackDrop })
     } else if (drag.mode === 'trim-start') {
       const start = Math.min(snap(drag.origStart + dt, drag.clipId), drag.origEnd - 0.05)
       setDrag({ ...drag, preview: { start, end: drag.origEnd } })
@@ -170,7 +178,10 @@ export function Timeline(): React.JSX.Element {
       select(collapseId)
       return
     }
-    if (d.mode === 'move' && d.hoverTrackId) {
+    if (d.mode === 'move' && d.newTrackDrop) {
+      const kind: Track['kind'] = d.clipKind === 'audio' ? 'audio' : d.clipKind === 'text' ? 'text' : 'video'
+      dispatch('새 트랙으로 이동', (p) => moveClipToNewTrack(p, d.clipId, createTrack(kind), d.preview.start))
+    } else if (d.mode === 'move' && d.hoverTrackId) {
       dispatch('클립 트랙 이동', (p) => moveClipToTrack(p, d.clipId, d.hoverTrackId!, d.preview.start))
     } else if (d.mode === 'move' && Math.abs(d.preview.start - d.origStart) > 1e-6) {
       dispatch('클립 이동', (p) => moveClip(p, d.clipId, d.preview.start))
@@ -179,6 +190,34 @@ export function Timeline(): React.JSX.Element {
     } else if (d.mode === 'trim-end' && Math.abs(d.preview.end - d.origEnd) > 1e-6) {
       dispatch('클립 트림(끝)', (p) => trimClip(p, d.clipId, 'end', d.preview.end))
     }
+  }
+
+  // ── 트랙 순서 드래그 (그립) ─────────────────────────────
+  /** 포인터 Y 로 삽입 지점(0..length) 계산 — 각 트랙 세로 중앙 기준 */
+  const computeDropIndex = (clientY: number): number => {
+    const els = Array.from(scrollRef.current?.querySelectorAll('[data-track-id]') ?? []) as HTMLElement[]
+    for (let i = 0; i < els.length; i++) {
+      const r = els[i].getBoundingClientRect()
+      if (clientY < r.top + r.height / 2) return i
+    }
+    return els.length
+  }
+  const beginTrackDrag = (e: React.PointerEvent, trackId: string): void => {
+    e.stopPropagation()
+    e.preventDefault()
+    setTrackDrag({ trackId, dropIndex: computeDropIndex(e.clientY) })
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+  }
+  const onTrackDragMove = (e: React.PointerEvent): void => {
+    if (!trackDrag) return
+    const dropIndex = computeDropIndex(e.clientY)
+    if (dropIndex !== trackDrag.dropIndex) setTrackDrag({ ...trackDrag, dropIndex })
+  }
+  const onTrackDragEnd = (): void => {
+    if (!trackDrag) return
+    const d = trackDrag
+    setTrackDrag(null)
+    dispatch('트랙 순서 변경', (p) => reorderTrack(p, d.trackId, d.dropIndex))
   }
 
   // ── 스크럽 (룰러/빈 영역) ───────────────────────────────
@@ -236,14 +275,29 @@ export function Timeline(): React.JSX.Element {
         </div>
 
         {/* 트랙들 */}
-        {project.tracks.map((track) => (
+        {project.tracks.map((track, trackIdx) => (
           <div
             key={track.id}
             data-track-id={track.id}
-            className={`track track-${track.kind} ${drag?.hoverTrackId === track.id ? 'drop-target' : ''}`}
+            className={
+              `track track-${track.kind}` +
+              (drag?.hoverTrackId === track.id ? ' drop-target' : '') +
+              (trackDrag?.trackId === track.id ? ' track-dragging' : '') +
+              (trackDrag && trackDrag.dropIndex === trackIdx ? ' drop-before' : '') +
+              (trackDrag && trackDrag.dropIndex === project.tracks.length && trackIdx === project.tracks.length - 1 ? ' drop-after' : '')
+            }
             style={{ height: TRACK_H[track.kind] }}
           >
             <div className="track-header" style={{ width: HEADER_W }}>
+              <div
+                className="track-grip"
+                title="드래그해서 트랙 순서 변경"
+                onPointerDown={(e) => beginTrackDrag(e, track.id)}
+                onPointerMove={onTrackDragMove}
+                onPointerUp={onTrackDragEnd}
+              >
+                ⠿
+              </div>
               <span className="track-kind">{track.kind === 'video' ? '비디오' : track.kind === 'audio' ? '오디오' : '텍스트'}</span>
               {track.kind !== 'text' && (
                 <>
@@ -317,8 +371,13 @@ export function Timeline(): React.JSX.Element {
           </div>
         ))}
 
-        {/* 트랙 추가 (멀티트랙): 비디오는 메인 위 오버레이로, 텍스트는 최상단, 오디오는 최하단 */}
-        <div className="track-add-row">
+        {/* 트랙 추가 (멀티트랙): 비디오는 메인 위 오버레이로, 텍스트는 최상단, 오디오는 최하단.
+            move 드래그 중에는 여기로 드롭하면 새 트랙을 만들어 클립을 내린다(data-newtrack-drop). */}
+        <div
+          className={`track-add-row ${drag?.mode === 'move' ? 'drop-newtrack' : ''} ${drag?.newTrackDrop ? 'drop-target' : ''}`}
+          data-newtrack-drop
+        >
+          {drag?.mode === 'move' && <span className="newtrack-hint">여기로 놓으면 새 트랙 생성</span>}
           <button
             className="btn small"
             onClick={() =>

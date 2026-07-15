@@ -335,6 +335,30 @@ select {
   z-index: 2;
   flex-shrink: 0;
 }
+.track-grip {
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 1px;
+  border-radius: 3px;
+  touch-action: none;
+  user-select: none;
+}
+.track-grip:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.track.track-dragging {
+  opacity: 0.5;
+}
+/* 드롭 위치 표시선 (노션 블록 이동) */
+.track.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.track.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
 .track-kind {
   font-size: 11px;
   color: var(--text-dim);
@@ -355,10 +379,32 @@ select {
 }
 .track-add-row {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 6px 8px;
   position: sticky;
   left: 0;
+}
+/* move 드래그 중: 새 트랙 드롭 영역임을 표시 */
+.track-add-row.drop-newtrack {
+  min-height: 34px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.2));
+  border-radius: 6px;
+  margin: 2px 8px;
+}
+.track-add-row.drop-target {
+  border-color: var(--accent);
+  background: rgba(79, 124, 255, 0.12);
+}
+.newtrack-hint {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-left: 4px;
+  pointer-events: none;
+}
+.track-add-row.drop-target .newtrack-hint {
+  opacity: 1;
+  color: var(--accent);
 }
 .asset-actions {
   display: flex;

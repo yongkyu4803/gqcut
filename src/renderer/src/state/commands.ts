@@ -425,6 +425,24 @@ export function updateTrack(p: Project, trackId: string, patch: Partial<Track>):
   return mapTrack(p, trackId, (t) => ({ ...t, ...patch }))
 }
 
+/**
+ * 트랙 순서 변경 (레이어 순서 조정) — 트랙을 뽑아 beforeIndex 위치(원본 배열 기준, 그 인덱스 트랙 "앞")에 끼운다.
+ * 노션 블록 드래그처럼 임의 위치로 재배치. tracks 배열은 위→아래(0=최상단=앞 레이어)이므로
+ * 위로 옮기면 화면 앞쪽 레이어가 된다. 실제 순서가 안 바뀌면 원본을 그대로 반환(히스토리 미기록).
+ */
+export function reorderTrack(p: Project, trackId: string, beforeIndex: number): Project {
+  const from = p.tracks.findIndex((t) => t.id === trackId)
+  if (from < 0) return p
+  const tracks = [...p.tracks]
+  const [moved] = tracks.splice(from, 1)
+  // beforeIndex 는 제거 전 배열 기준 — 제거 지점보다 뒤면 한 칸 당겨진다
+  let insert = beforeIndex > from ? beforeIndex - 1 : beforeIndex
+  insert = Math.max(0, Math.min(tracks.length, insert))
+  if (insert === from) return p // 제자리 → no-op
+  tracks.splice(insert, 0, moved)
+  return touch({ ...p, tracks })
+}
+
 export function addTrack(p: Project, track: Track, index?: number): Project {
   const tracks = [...p.tracks]
   tracks.splice(index ?? tracks.length, 0, track)
@@ -474,6 +492,87 @@ export function moveClipToTrack(p: Project, clipId: string, targetTrackId: strin
           : t
     )
   })
+}
+
+/**
+ * 클립을 새로 만든 트랙으로 이동 (타임라인 빈 공간으로 세로 드래그 — 컷 조각을 새 트랙으로 "내리기").
+ * 원본 트랙의 바로 위에 같은 종류의 새 트랙을 만들어 클립을 옮긴다.
+ * 비디오는 새 트랙이 위(앞 레이어)라 이동한 클립이 화면 맨 앞에 보인다(상단 우선 규칙과 일치).
+ * 원본 트랙이 비게 되어도 트랙은 유지한다 — 사용자가 명시적으로 지우기 전까지 레이아웃을 보존.
+ */
+export function moveClipToNewTrack(p: Project, clipId: string, newTrack: Track, newStart: number): Project {
+  const found = findClip(p, clipId)
+  if (!found) return p
+  if (!trackAcceptsClip(newTrack, found.clip.kind)) return p
+
+  const len = found.clip.timelineEnd - found.clip.timelineStart
+  const start = snapToFrame(Math.max(0, newStart), p.settings.fps)
+  const moved: Clip = {
+    ...found.clip,
+    timelineStart: start,
+    timelineEnd: start + len,
+    // 전환은 원래 트랙의 인접 관계에 종속 — 이동 시 해제 (불변식 6)
+    transitionIn: undefined,
+    transitionOut: undefined
+  }
+  const srcIdx = p.tracks.findIndex((t) => t.id === found.track.id)
+  const tracks = p.tracks.map((t) =>
+    t.id === found.track.id ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+  )
+  tracks.splice(srcIdx, 0, { ...newTrack, clips: [moved] })
+  return touch({ ...p, tracks })
+}
+
+/** 이 비디오 클립이 오디오를 분리할 수 있는가 (버튼 활성화 판정) — 소스 오디오가 있고 아직 음소거(분리)되지 않음 */
+export function canDetachAudio(p: Project, clipId: string): boolean {
+  const found = findClip(p, clipId)
+  if (!found || found.clip.kind !== 'video' || !found.clip.assetId) return false
+  const asset = p.assets.find((a) => a.id === found.clip.assetId)
+  if (!asset?.hasAudio) return false
+  return (found.clip.volume ?? 1) > 0
+}
+
+/**
+ * 오디오 분리 (detach audio) — 비디오 클립의 소리를 같은 자산을 참조하는 오디오 클립으로 떼어내
+ * 오디오 트랙에 배치하고, 원본 비디오 클립은 음소거(volume=0)한다. 소리가 두 번 나지 않도록.
+ * 분리된 오디오 클립은 타임라인 UI 에서 파형이 렌더된다(오디오 클립 → Waveform). 같은 시간대가 빈
+ * 오디오 트랙이 있으면 재사용, 없으면 새 오디오 트랙을 맨 아래에 만든다.
+ */
+export function detachAudio(p: Project, clipId: string, newTrack: Track): Project {
+  const found = findClip(p, clipId)
+  if (!found || found.clip.kind !== 'video' || !found.clip.assetId) return p
+  const { track, clip } = found
+  const asset = p.assets.find((a) => a.id === clip.assetId)
+  if (!asset?.hasAudio || (clip.volume ?? 1) <= 0) return p
+
+  const audioClip: Clip = {
+    id: genId('clip'),
+    assetId: clip.assetId,
+    kind: 'audio',
+    timelineStart: clip.timelineStart,
+    timelineEnd: clip.timelineEnd,
+    sourceIn: clip.sourceIn,
+    sourceOut: clip.sourceOut,
+    speed: clip.speed ?? 1,
+    volume: clip.volume ?? 1,
+    ...(clip.fadeIn !== undefined ? { fadeIn: clip.fadeIn } : {}),
+    ...(clip.fadeOut !== undefined ? { fadeOut: clip.fadeOut } : {})
+  }
+
+  // 1) 원본 비디오 클립 음소거
+  let tracks = p.tracks.map((t) =>
+    t.id === track.id ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, volume: 0 } : c)) } : t
+  )
+  // 2) 같은 시간대가 빈 오디오 트랙 재사용, 없으면 새 트랙(맨 아래)
+  const free = (t: Track): boolean =>
+    t.kind === 'audio' && !t.clips.some((c) => audioClip.timelineStart < c.timelineEnd && audioClip.timelineEnd > c.timelineStart)
+  const reusable = tracks.find(free)
+  if (reusable) {
+    tracks = tracks.map((t) => (t.id === reusable.id ? { ...t, clips: sortClips([...t.clips, audioClip]) } : t))
+  } else {
+    tracks = [...tracks, { ...newTrack, clips: [audioClip] }]
+  }
+  return touch({ ...p, tracks })
 }
 
 /**

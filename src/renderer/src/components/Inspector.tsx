@@ -12,7 +12,8 @@ import { SFX_BY_ID, SFX_LIBRARY } from '@shared/sfx'
 import { formatTimecode } from '@shared/time'
 import { playback } from '@renderer/engine/playback'
 import { useEditor, type SilenceScope } from '@renderer/state/store'
-import { findClip, setClipSpeed, updateClips, updateSettings } from '@renderer/state/commands'
+import { canDetachAudio, detachAudio, findClip, setClipSpeed, updateClips, updateSettings } from '@renderer/state/commands'
+import { createTrack } from '@shared/model/factory'
 import { displayFontName, GENERIC_FONT_FALLBACK, listSystemFonts } from '@renderer/engine/fonts'
 import { exportSubtitlesSrt, generateCaptions } from '@renderer/stt/autoCaption'
 import { applySilenceCut, cancelSilencePreview, detectSilence } from '@renderer/silence/autoCut'
@@ -182,6 +183,17 @@ export function Inspector(): React.JSX.Element {
           <Row label="볼륨">
             <input type="range" min={0} max={1} step={0.01} value={clip.volume ?? 1} onChange={(e) => set('클립 볼륨', { volume: Number(e.target.value) })} />
           </Row>
+          {!multi && clip.kind === 'video' && canDetachAudio(project, clip.id) && (
+            <button
+              className="btn small"
+              data-testid="detach-audio-btn"
+              onClick={() => dispatch('오디오 분리', (p) => detachAudio(p, clip.id, createTrack('audio')))}
+              style={{ width: '100%', marginTop: 4 }}
+              title="영상의 소리를 별도 오디오 트랙(파형)으로 분리합니다"
+            >
+              ♪ 오디오 분리
+            </button>
+          )}
         </>
       )}
 
