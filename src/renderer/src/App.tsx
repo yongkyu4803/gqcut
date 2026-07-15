@@ -30,25 +30,26 @@ export default function App(): React.JSX.Element {
   const sttProgress = useEditor((s) => s.sttProgress)
   const silenceProgress = useEditor((s) => s.silenceProgress)
 
-  // 타임라인 높이 조절 (리사이저 드래그) — 트랙이 많아지면 늘려서 스크롤 없이 더 보기
-  const [timelineH, setTimelineH] = useState<number>(() => {
-    const saved = Number(localStorage.getItem('timelineHeight'))
-    return saved >= 120 ? saved : 260
+  // 상단(미리보기) 영역 높이 조절 — 타임라인은 남는 공간을 전부 차지(flex:1)하므로,
+  // 위쪽을 줄이면 타임라인이 그만큼 커진다. 트랙이 많아도 스크롤 대신 최대한 펼쳐진다.
+  const [topH, setTopH] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('topPaneHeight'))
+    return saved >= 160 ? saved : 360
   })
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null)
   useEffect(() => {
-    localStorage.setItem('timelineHeight', String(timelineH))
-  }, [timelineH])
+    localStorage.setItem('topPaneHeight', String(topH))
+  }, [topH])
   const onResizeDown = (e: React.PointerEvent): void => {
-    resizeRef.current = { startY: e.clientY, startH: timelineH }
+    resizeRef.current = { startY: e.clientY, startH: topH }
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
   const onResizeMove = (e: React.PointerEvent): void => {
     const r = resizeRef.current
     if (!r) return
-    // 위로 끌면(clientY 감소) 타임라인이 커진다. 상단 영역이 최소 160px 는 남도록 상한 제한.
-    const max = Math.max(200, window.innerHeight - 160)
-    setTimelineH(Math.min(max, Math.max(120, r.startH - (e.clientY - r.startY))))
+    // 위로 끌면(clientY 감소) 상단이 줄고 타임라인이 커진다. 타임라인 최소 140px 확보.
+    const max = Math.max(200, window.innerHeight - 140)
+    setTopH(Math.min(max, Math.max(160, r.startH + (e.clientY - r.startY))))
   }
   const onResizeUp = (): void => {
     resizeRef.current = null
@@ -177,7 +178,7 @@ export default function App(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="app" style={{ '--timeline-h': `${timelineH}px` } as React.CSSProperties}>
+    <div className="app" style={{ '--top-h': `${topH}px` } as React.CSSProperties}>
       <div className="main-row">
         <MediaBin />
         <Preview />

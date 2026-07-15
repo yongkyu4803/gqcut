@@ -58,10 +58,11 @@ body {
 }
 
 .main-row {
-  flex: 1;
+  /* 상단(미리보기) 영역: 리사이저로 조절되는 높이. 타임라인이 나머지를 전부 차지한다. */
+  flex: 0 0 var(--top-h, 360px);
   display: grid;
   grid-template-columns: 240px 1fr 320px;
-  min-height: 0;
+  min-height: 160px;
 }
 
 /* ── 미디어 빈 ─────────────────────────── */
@@ -300,8 +301,9 @@ select {
   background: var(--accent);
 }
 .timeline {
-  height: var(--timeline-h, 260px);
-  flex-shrink: 0;
+  /* 남는 세로 공간을 전부 차지 — 트랙이 많아도 스크롤 대신 최대한 펼쳐진다. */
+  flex: 1 1 auto;
+  min-height: 140px;
   overflow: auto;
   background: var(--bg);
   position: relative;
