@@ -26,8 +26,13 @@ export interface DemuxedVideo {
   durationSec: number
 }
 
+/**
+ * filePath 를 쿼리 파라미터로 통째로 인코딩한다 — 세그먼트 단위(split('/'))로 나누면
+ * Windows 경로("C:\Users\...")가 백슬래시라 전혀 분리되지 않고 URL host 로 삼켜져
+ * pathname 이 비어버리는 버그가 있었다(ERR_FILE_NOT_FOUND 반복 발생 원인).
+ */
 export function mediaUrl(filePath: string): string {
-  return `media://local${filePath.split('/').map(encodeURIComponent).join('/')}`
+  return `media://local/?p=${encodeURIComponent(filePath)}`
 }
 
 /** avcC/hvcC 등 코덱 설정 박스를 VideoDecoderConfig.description 으로 직렬화 */
